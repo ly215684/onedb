@@ -54,6 +54,8 @@
   "build": {
     "appId": "com.onedb.desktop",
     "productName": "OneDB",
+    "npmRebuild": false,
+    "publish": null,
     "directories": {
       "output": "release/${version}",
       "buildResources": "build"

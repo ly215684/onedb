@@ -46,7 +46,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build (${{ matrix.script }})
-        run: pnpm run ${{ matrix.script }} -- --publish never
+        # --publish never 已配置在 package.json 的 build.publish=null，无需命令行传参
+        run: pnpm run ${{ matrix.script }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
