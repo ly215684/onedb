@@ -1,6 +1,6 @@
 {
   "name": "onedb",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "OneDB - 多数据库管理工具（MySQL / PostgreSQL / MongoDB / MongoDB SRV / SQLite / Redis）",
   "main": "./out/main/index.js",
   "private": true,
