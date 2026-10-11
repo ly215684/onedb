@@ -18,7 +18,7 @@
     "dist:linux": "electron-vite build && electron-builder --linux",
     "gen:icon": "node scripts/gen-icon.mjs",
     "bump": "node scripts/version.mjs",
-    "release": "node scripts/version.mjs patch --tag"
+    "release": "node scripts/version.mjs patch --tag --push"
   },
   "dependencies": {
     "ioredis": "^5.4.1",
