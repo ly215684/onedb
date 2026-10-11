@@ -5,7 +5,7 @@
 //   node scripts/version.mjs major            # 0.1.0 -> 1.0.0
 //   node scripts/version.mjs 1.2.3            # 直接指定版本
 //   node scripts/version.mjs patch --tag      # 更新后自动 git commit + tag v<version>
-//   node scripts/version.mjs patch --tag --push   # 并推送到远端(触发 Release)
+//   node scripts/version.mjs patch --tag --push   # 并推送当前分支与 tag 到远端(触发 Release)
 import { readFileSync, writeFileSync } from 'fs'
 import { execSync } from 'child_process'
 import { dirname, resolve } from 'path'
@@ -68,8 +68,17 @@ if (flags.has('--tag')) {
     execSync(`git tag ${tag}`, { stdio: 'inherit' })
     console.log(`已创建提交并打标签: ${tag}`)
     if (flags.has('--push')) {
-      execSync(`git push --follow-tags`, { stdio: 'inherit' })
-      console.log('已推送到远端，GitHub Actions 将触发打包发布。')
+      // 远端不一定叫 origin（可能配置为其他别名），优先取当前分支跟踪的远端，否则回退 origin
+      let remote = 'origin'
+      try {
+        remote = execSync('git rev-parse --abbrev-ref @{u}', { encoding: 'utf8' }).trim().split('/')[0] || 'origin'
+      } catch {
+        console.log('提示: 当前分支没有上游远端，将尝试推送到 origin。')
+      }
+      // 显式推送当前分支和本次 tag，避免 --follow-tags 因默认远端不匹配而静默失败
+      const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim()
+      execSync(`git push ${remote} refs/heads/${branch} refs/tags/${tag}`, { stdio: 'inherit' })
+      console.log(`已推送 ${branch} 和 ${tag} 到 ${remote}，GitHub Actions 将触发打包发布。`)
     } else {
       console.log(`提示: 运行 "git push --follow-tags" 推送标签以触发 Release。`)
     }
