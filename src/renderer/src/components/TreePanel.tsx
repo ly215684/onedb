@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   ChevronRight,
   Database as DbIcon,
@@ -16,7 +16,7 @@ import {
   Power,
   Circle
 } from 'lucide-react'
-import { useApp } from '../store/useApp'
+import { isOnline, useApp } from '../store/useApp'
 import { DB_META, dbColor } from '../lib/dbMeta'
 import { useT, useShowDbColor } from '../lib/i18n'
 import type { ConnectionConfig, DbType } from '../../../shared/types'
@@ -37,15 +37,16 @@ interface RawNode {
 
 const REDIS_DBS = Array.from({ length: 16 }, (_, i) => i)
 
-function nodeIcon(n: RawNode, open: boolean, showColor: boolean): ReactNode {
+function nodeIcon(n: RawNode, open: boolean, showColor: boolean, online = true): ReactNode {
   switch (n.type) {
-    case 'connection':
-      return (
-        <span
-          className="h-2.5 w-2.5 rounded-full"
-          style={{ background: showColor ? dbColor(n.dbType) : 'var(--text-disabled)' }}
-        />
+    case 'connection': {
+      const color = showColor ? dbColor(n.dbType) : 'var(--text-disabled)'
+      return online ? (
+        <span className="h-2.5 w-2.5 rounded-full" style={{ background: color }} />
+      ) : (
+        <span className="h-2.5 w-2.5 rounded-full" style={{ border: `1.5px solid ${color}`, opacity: 0.45 }} />
       )
+    }
     case 'database':
       return <DbIcon size={14} className="text-fg-muted" />
     case 'schema':
@@ -204,6 +205,37 @@ export function TreePanel(): React.JSX.Element {
     })
   }
 
+  async function expandConnection(conn: ConnectionConfig): Promise<void> {
+    const n: RawNode = {
+      key: `c:${conn.id}`,
+      label: conn.name,
+      type: 'connection',
+      connectionId: conn.id,
+      dbType: conn.type
+    }
+    invalidate(conn.id)
+    await ensureChildren(n)
+    setExpanded((prev) => new Set(prev).add(n.key))
+  }
+
+  // 与连接总览联动：外部连接/断开后同步树的展开与缓存
+  const prevConnected = useRef(app.connected)
+  useEffect(() => {
+    const prev = prevConnected.current
+    prevConnected.current = app.connected
+    const ids = new Set([...Object.keys(prev), ...Object.keys(app.connected)])
+    for (const id of ids) {
+      const was = id in prev
+      const now = id in app.connected
+      if (was && !now) {
+        invalidate(id)
+      } else if (!was && now) {
+        const conn = app.connections.find((c) => c.id === id)
+        if (conn) void expandConnection(conn)
+      }
+    }
+  }, [app.connected])
+
   async function onConnection(conn: ConnectionConfig): Promise<void> {
     const n: RawNode = {
       key: `c:${conn.id}`,
@@ -212,12 +244,9 @@ export function TreePanel(): React.JSX.Element {
       connectionId: conn.id,
       dbType: conn.type
     }
-    const online = !!app.connected[conn.id]
-    if (!online) {
+    if (!isOnline(app.connected, conn.id)) {
+      // 连接成功后由上面的联动逻辑自动展开
       await app.connect(conn.id)
-      invalidate(conn.id)
-      await ensureChildren(n)
-      setExpanded((prev) => new Set(prev).add(n.key))
       return
     }
     await toggle(n)
@@ -404,7 +433,7 @@ export function TreePanel(): React.JSX.Element {
               dbType: conn.type
             }
             const open = expanded.has(n.key)
-            const online = !!app.connected[conn.id]
+            const online = isOnline(app.connected, conn.id)
             const kids = children[n.key]
             return (
               <div key={conn.id}>
@@ -417,15 +446,14 @@ export function TreePanel(): React.JSX.Element {
                     size={13}
                     className={cx('shrink-0 text-fg-faint transition-transform', open && 'rotate-90')}
                   />
-                  {nodeIcon(n, open, showColor)}
-                  <span className="truncate font-medium text-fg">{conn.name}</span>
+                  {nodeIcon(n, open, showColor, online)}
+                  <span className={cx('truncate font-medium', online ? 'text-fg' : 'text-fg-muted')}>{conn.name}</span>
                   <span className="ml-auto hidden shrink-0 items-center gap-0.5 group-hover:flex">
                     {online ? (
                       <MiniAct
                         title={tx.home.disconnect}
                         onClick={() => {
-                          app.disconnect(conn.id)
-                          invalidate(conn.id)
+                          void app.disconnect(conn.id)
                         }}
                       >
                         <Power size={12} />

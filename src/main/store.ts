@@ -32,7 +32,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   language: 'zh',
   editorLigatures: true,
   showDbColorLabels: true,
-  defaultLimit: 200
+  defaultLimit: 200,
+  defaultPageSize: 100
 }
 
 export const store = {

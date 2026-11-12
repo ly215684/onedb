@@ -4,6 +4,7 @@ import { useApp, type Tab } from '../store/useApp'
 import { useT } from '../lib/i18n'
 import { Button, Modal, cx } from '../components/ui/primitives'
 import { Pagination } from '../components/ui/Pagination'
+import { useColumnSelect } from '../components/useColumnSelect'
 import type { MongoDoc } from '../../../shared/types'
 
 export function MongoScreen({ tab }: { tab: Tab }): React.JSX.Element {
@@ -16,7 +17,7 @@ export function MongoScreen({ tab }: { tab: Tab }): React.JSX.Element {
   const [docs, setDocs] = useState<MongoDoc[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
-  const [pageSize, setPageSize] = useState(20)
+  const [pageSize, setPageSize] = useState(app.settings.defaultPageSize)
   const [filter, setFilter] = useState('')
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -36,6 +37,7 @@ export function MongoScreen({ tab }: { tab: Tab }): React.JSX.Element {
       setTotal(r.total)
       setEditing(null)
       setPending({})
+      colSel.clear()
     } catch (e) {
       setErr((e as Error).message)
     } finally {
@@ -53,6 +55,12 @@ export function MongoScreen({ tab }: { tab: Tab }): React.JSX.Element {
     for (const d of docs) for (const k of Object.keys(d.preview)) if (!set.includes(k)) set.push(k)
     return set
   }, [docs])
+
+  // 0 号为 _id，之后依次对应 columns
+  const colSel = useColumnSelect(
+    (c) => docs.map((d) => (c === 0 ? d._id : String(d.preview[columns[c - 1]] ?? ''))),
+    (c) => (c === 0 ? '_id' : columns[c - 1])
+  )
 
   function toggle(id: string): void {
     setExpanded((p) => {
@@ -174,17 +182,32 @@ export function MongoScreen({ tab }: { tab: Tab }): React.JSX.Element {
         ) : docs.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-fg-faint">{t.mongo.empty}</div>
         ) : (
-          <table className="w-full border-collapse text-xs">
+          <table className="w-full border-separate border-spacing-0 text-xs" onContextMenu={colSel.onContextMenu}>
             <thead className="sticky top-0 z-10">
               <tr className="bg-surface text-left">
-                <th className="w-8 border-b border-line" />
-                <th className="whitespace-nowrap border-b border-line bg-surface px-3 py-1.5 font-code font-medium text-fg-muted">_id</th>
-                {columns.map((k) => (
-                  <th key={k} className="whitespace-nowrap border-b border-line bg-surface px-3 py-1.5 font-code font-medium text-fg-muted">
+                <th className="w-8 border-b border-line bg-surface" />
+                <th
+                  onClick={() => colSel.selectCol(0)}
+                  className={cx(
+                    'cursor-pointer select-none whitespace-nowrap border-b border-line bg-surface px-3 py-1.5 font-code font-medium text-fg-muted',
+                    colSel.selectedCol === 0 && 'bg-accent-soft text-accent'
+                  )}
+                >
+                  _id
+                </th>
+                {columns.map((k, j) => (
+                  <th
+                    key={`${j}-${k}`}
+                    onClick={() => colSel.selectCol(j + 1)}
+                    className={cx(
+                      'cursor-pointer select-none whitespace-nowrap border-b border-line bg-surface px-3 py-1.5 font-code font-medium text-fg-muted',
+                      colSel.selectedCol === j + 1 && 'bg-accent-soft text-accent'
+                    )}
+                  >
                     {k}
                   </th>
                 ))}
-                <th className="w-10 border-b border-line" />
+                <th className="w-10 border-b border-line bg-surface" />
               </tr>
             </thead>
             <tbody>
@@ -202,10 +225,16 @@ export function MongoScreen({ tab }: { tab: Tab }): React.JSX.Element {
                           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                         </button>
                       </td>
-                      <td className="max-w-[220px] truncate px-3 py-1.5 font-code text-fg" title={d._id}>
+                      <td
+                        className={cx(
+                          'max-w-[220px] truncate px-3 py-1.5 font-code text-fg',
+                          colSel.selectedCol === 0 && 'bg-accent-soft/70'
+                        )}
+                        title={d._id}
+                      >
                         {d._id}
                       </td>
-                      {columns.map((k) => {
+                      {columns.map((k, j) => {
                         const dirty = `${d._id}|${k}` in pending
                         const isEditing = editing?.id === d._id && editing?.field === k
                         return (
@@ -214,7 +243,8 @@ export function MongoScreen({ tab }: { tab: Tab }): React.JSX.Element {
                             onDoubleClick={() => setEditing({ id: d._id, field: k, value: d.preview[k] ?? '' })}
                             className={cx(
                               'max-w-[280px] cursor-cell truncate px-3 py-1.5 font-code text-fg-muted',
-                              dirty && 'bg-accent-soft font-medium text-fg ring-1 ring-inset ring-accent/40'
+                              dirty && 'bg-accent-soft font-medium text-fg ring-1 ring-inset ring-accent/40',
+                              colSel.selectedCol === j + 1 && 'bg-accent-soft/70'
                             )}
                             title={t.mongo.cellEdit}
                           >
@@ -267,7 +297,7 @@ export function MongoScreen({ tab }: { tab: Tab }): React.JSX.Element {
           page={page}
           pageSize={pageSize}
           total={total}
-          pageSizeOptions={[10, 20, 50, 100]}
+          pageSizeOptions={[10, 20, 50, 100, 200, 500, 1000]}
           disabled={pendingCount > 0}
           onPageChange={setPage}
           onPageSizeChange={(s) => {
@@ -299,6 +329,8 @@ export function MongoScreen({ tab }: { tab: Tab }): React.JSX.Element {
           />
         </Modal>
       )}
+
+      {colSel.menu}
     </div>
   )
 }

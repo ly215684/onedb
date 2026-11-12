@@ -190,4 +190,5 @@ export interface AppSettings {
   editorLigatures: boolean
   showDbColorLabels: boolean
   defaultLimit: number
+  defaultPageSize: number
 }

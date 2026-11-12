@@ -1,5 +1,5 @@
 import { Plus, PlugZap, Power, Pencil, Trash2, Terminal, ArrowRight, LayoutGrid } from 'lucide-react'
-import { useApp } from '../store/useApp'
+import { useApp, isOnline } from '../store/useApp'
 import { DB_META, DB_ORDER, dbColor } from '../lib/dbMeta'
 import { useT, useShowDbColor } from '../lib/i18n'
 import { Button, EmptyState } from '../components/ui/primitives'
@@ -71,7 +71,7 @@ export function HomeScreen(): React.JSX.Element {
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {app.connections.map((c) => {
-              const online = !!app.connected[c.id]
+              const online = isOnline(app.connected, c.id)
               const version = app.connected[c.id]
               return (
                 <div

@@ -1,5 +1,5 @@
 import { Minus, Square, X, Database } from 'lucide-react'
-import { useApp } from '../store/useApp'
+import { isOnline, useApp } from '../store/useApp'
 import { useShowDbColor } from '../lib/i18n'
 import { dbColor } from '../lib/dbMeta'
 
@@ -23,7 +23,7 @@ export function TitleBar(): React.JSX.Element {
             )}
             <span
               className="h-2 w-2 rounded-full"
-              style={{ background: connected[conn.id] ? 'var(--success)' : 'var(--text-disabled)' }}
+              style={{ background: isOnline(connected, conn.id) ? 'var(--success)' : 'var(--text-disabled)' }}
             />
             {conn.name}
           </span>

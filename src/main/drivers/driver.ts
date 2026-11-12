@@ -26,6 +26,8 @@ export interface RelationalDriver {
     value?: unknown,
     row?: Record<string, unknown>
   ): string
+  /** 在同一事务内依次执行 DML 语句，返回受影响行数总和 */
+  runBatch(db: string | undefined, statements: string[]): Promise<number>
   quoteIdent(name: string): string
   close(): Promise<void>
 }

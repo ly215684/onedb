@@ -121,11 +121,25 @@ export class SqliteDriver implements RelationalDriver {
   buildDataDML(_db: string, _schema: string | undefined, table: string, kind: 'update' | 'insert' | 'delete', pk: Record<string, unknown>, column?: string, value?: unknown, row?: Record<string, unknown>): string {
     const t = this.quoteIdent(table)
     const where = Object.entries(pk).map(([k, v]) => `${this.quoteIdent(k)} = ${lit(v)}`).join(' AND ')
-    if (kind === 'delete') return `DELETE FROM ${t} WHERE ${where} LIMIT 1`
+    if (kind === 'delete') return `DELETE FROM ${t} WHERE ${where}`
     if (kind === 'update') return `UPDATE ${t} SET ${this.quoteIdent(column!)} = ${lit(value)} WHERE ${where}`
     const cols = Object.keys(row!).map((c) => this.quoteIdent(c)).join(', ')
     const vals = Object.values(row!).map((v) => lit(v)).join(', ')
     return `INSERT INTO ${t} (${cols}) VALUES (${vals})`
+  }
+
+  async runBatch(_db: string | undefined, statements: string[]): Promise<number> {
+    this.db.exec('BEGIN')
+    try {
+      let n = 0
+      for (const sql of statements) n += this.exec(sql).affectedRows ?? 0
+      this.db.exec('COMMIT')
+      this.persist()
+      return n
+    } catch (e) {
+      this.db.exec('ROLLBACK')
+      throw e
+    }
   }
 
   async close(): Promise<void> {

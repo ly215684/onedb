@@ -164,13 +164,11 @@ class DBManager {
   async applyDataChanges(id: string, db: string, schema: string | undefined, table: string, changes: PendingChange[]): Promise<number> {
     const c = this.get(id)
     if (!c.relational) throw new Error('不支持')
-    let n = 0
-    for (const ch of changes) {
-      const sql = c.relational.buildDataDML(db, schema, table, ch.kind, ch.pk, ch.column, ch.value, ch.row)
-      const r = await c.relational.query(db, sql)
-      n += r.affectedRows ?? 0
-    }
-    return n
+    const statements = changes.map((ch) =>
+      c.relational!.buildDataDML(db, schema, table, ch.kind, ch.pk, ch.column, ch.value, ch.row)
+    )
+    if (!statements.length) return 0
+    return c.relational.runBatch(db, statements)
   }
 
   async getERDiagram(id: string, db: string, schema?: string): Promise<ERDiagram> {

@@ -158,6 +158,26 @@ export class PostgresDriver implements RelationalDriver {
     return `INSERT INTO ${t} (${cols}) VALUES (${vals})`
   }
 
+  async runBatch(db: string | undefined, statements: string[]): Promise<number> {
+    const client = await this.pool.connect()
+    try {
+      if (db) await client.query(`SET search_path TO ${this.quoteIdent(db)}, public`)
+      await client.query('BEGIN')
+      let n = 0
+      for (const sql of statements) {
+        const r = await client.query(sql)
+        n += r.rowCount ?? 0
+      }
+      await client.query('COMMIT')
+      return n
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {})
+      throw e
+    } finally {
+      client.release()
+    }
+  }
+
   async close(): Promise<void> {
     await this.pool.end()
   }

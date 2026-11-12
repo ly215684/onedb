@@ -32,7 +32,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   language: 'zh',
   editorLigatures: true,
   showDbColorLabels: true,
-  defaultLimit: 200
+  defaultLimit: 200,
+  defaultPageSize: 100
 }
 
 interface AppState {
@@ -220,6 +221,11 @@ export const useApp = create<AppState>((set, get) => ({
     set({ toasts: get().toasts.filter((t) => t.id !== id) })
   }
 }))
+
+/** 连接是否在线：connected 中只要存在该 id 即视为在线（版本号可能未知） */
+export function isOnline(connected: Record<string, string | undefined>, id?: string): boolean {
+  return !!id && Object.prototype.hasOwnProperty.call(connected, id)
+}
 
 export function useActiveTab(): Tab | undefined {
   return useApp((s) => s.tabs.find((t) => t.id === s.activeTabId))

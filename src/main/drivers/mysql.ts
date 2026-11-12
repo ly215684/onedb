@@ -170,6 +170,23 @@ export class MysqlDriver implements RelationalDriver {
     return `INSERT INTO ${t} (${cols}) VALUES (${vals})`
   }
 
+  async runBatch(db: string | undefined, statements: string[]): Promise<number> {
+    await this.conn.beginTransaction()
+    try {
+      if (db) await this.conn.query(`USE ${this.quoteIdent(db)}`)
+      let n = 0
+      for (const sql of statements) {
+        const [result] = await this.conn.query(sql)
+        if (!Array.isArray(result)) n += (result as { affectedRows?: number }).affectedRows ?? 0
+      }
+      await this.conn.commit()
+      return n
+    } catch (e) {
+      await this.conn.rollback().catch(() => {})
+      throw e
+    }
+  }
+
   async close(): Promise<void> {
     await this.conn.end()
   }

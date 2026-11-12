@@ -129,6 +129,15 @@ export function SettingsScreen(): React.JSX.Element {
                 />
               </div>
             </Row>
+            <Row label={tx.settings.pageSize} desc={tx.settings.pageSizeDesc}>
+              <div className="w-32">
+                <Select
+                  value={String(s.defaultPageSize)}
+                  onChange={(v) => update({ defaultPageSize: Number(v) })}
+                  options={[20, 50, 100, 200, 500, 1000].map((n) => ({ value: String(n), label: String(n) }))}
+                />
+              </div>
+            </Row>
           </div>
         </Section>
 

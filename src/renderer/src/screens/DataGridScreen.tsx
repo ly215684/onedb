@@ -4,6 +4,7 @@ import { useApp, type Tab } from '../store/useApp'
 import { useT } from '../lib/i18n'
 import { Button, cx, Badge } from '../components/ui/primitives'
 import { Pagination } from '../components/ui/Pagination'
+import { useColumnSelect } from '../components/useColumnSelect'
 import { fmtCell } from '../lib/dbMeta'
 import type { PendingChange, TableSchema } from '../../../shared/types'
 
@@ -32,7 +33,9 @@ export function DataGridScreen({ tab }: { tab: Tab }): React.JSX.Element {
   const [schema, setSchema] = useState<TableSchema | null>(null)
   const [columns, setColumns] = useState<string[]>([])
   const [rows, setRows] = useState<unknown[][]>([])
-  const [pageSize, setPageSize] = useState(100)
+  // 加载时的原始行，用于定位主键（编辑允许改主键列，WHERE 必须用旧值）
+  const [origRows, setOrigRows] = useState<unknown[][]>([])
+  const [pageSize, setPageSize] = useState(app.settings.defaultPageSize)
   const [page, setPage] = useState(0)
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -42,7 +45,12 @@ export function DataGridScreen({ tab }: { tab: Tab }): React.JSX.Element {
   const [deletes, setDeletes] = useState<Set<number>>(new Set())
   const [newRows, setNewRows] = useState<Record<string, string>[]>([])
   const [editing, setEditing] = useState<CellEdit | null>(null)
+  const colSel = useColumnSelect(
+    (c) => rows.map((r) => fmtCell(r[c])),
+    (c) => columns[c]
+  )
 
+  // 列选中与右键菜单由 useColumnSelect 提供
   const colIndex = useCallback((name: string) => columns.indexOf(name), [columns])
 
   const idxOfPk = (schema?.columns ?? []).filter((c) => c.isPrimary).map((c) => c.name)
@@ -67,9 +75,11 @@ export function DataGridScreen({ tab }: { tab: Tab }): React.JSX.Element {
       })
       setColumns(r.columns)
       setRows(r.rows)
+      setOrigRows(r.rows)
       setEdits({})
       setDeletes(new Set())
       setNewRows([])
+      colSel.clear()
       try {
         const cnt = await window.onedb.sql.query(conn.id, {
           connectionId: conn.id,
@@ -95,7 +105,7 @@ export function DataGridScreen({ tab }: { tab: Tab }): React.JSX.Element {
 
   function pkFor(rowIdx: number): Record<string, unknown> {
     const pk: Record<string, unknown> = {}
-    for (const p of idxOfPk) pk[p] = rows[rowIdx][colIndex(p)]
+    for (const p of idxOfPk) pk[p] = origRows[rowIdx]?.[colIndex(p)]
     return pk
   }
 
@@ -182,15 +192,26 @@ export function DataGridScreen({ tab }: { tab: Tab }): React.JSX.Element {
         {err ? (
           <div className="m-3 rounded-md border border-bad/40 bg-bad/10 p-3 font-code text-xs text-bad">{err}</div>
         ) : (
-          <table className="w-full border-collapse text-[12.5px]">
+          <table
+            className="w-full border-separate border-spacing-0 text-[12.5px]"
+            onContextMenu={colSel.onContextMenu}
+          >
             <thead className="sticky top-0 z-10">
               <tr className="bg-raised">
                 <th className="w-16 border-b border-r border-line px-2 py-1.5 text-center text-[11px] text-fg-faint">{t.data.op}</th>
                 <th className="w-10 border-b border-r border-line px-2 py-1.5 text-right font-mono text-[11px] text-fg-faint">#</th>
-                {columns.map((c) => {
+                {columns.map((c, j) => {
                   const isPk = idxOfPk.includes(c)
+                  const selected = colSel.selectedCol === j
                   return (
-                    <th key={c} className="whitespace-nowrap border-b border-r border-line px-2.5 py-1.5 text-left font-semibold text-fg">
+                    <th
+                      key={c}
+                      onClick={() => colSel.selectCol(j)}
+                      className={cx(
+                        'cursor-pointer select-none whitespace-nowrap border-b border-r border-line bg-raised px-2.5 py-1.5 text-left font-semibold text-fg',
+                        selected && 'bg-accent-soft text-accent'
+                      )}
+                    >
                       <span className="flex items-center gap-1">
                         {isPk && <span className="text-warn">🔑</span>}
                         {c}
@@ -236,6 +257,7 @@ export function DataGridScreen({ tab }: { tab: Tab }): React.JSX.Element {
                             'max-w-[260px] cursor-cell truncate border-b border-r border-line-soft px-2.5 py-0.5',
                             del && 'bg-bad/10 text-fg-faint line-through',
                             dirty && 'bg-accent-soft font-medium text-fg ring-1 ring-inset ring-accent/40',
+                            colSel.selectedCol === j && !del && 'bg-accent-soft/70',
                             !dirty && (r[j] === null || r[j] === undefined ? 'italic text-fg-faint' : 'font-code')
                           )}
                           title={t.data.doubleClickEdit}
@@ -308,6 +330,8 @@ export function DataGridScreen({ tab }: { tab: Tab }): React.JSX.Element {
           </button>
         )}
       </div>
+
+      {colSel.menu}
     </div>
   )
 }

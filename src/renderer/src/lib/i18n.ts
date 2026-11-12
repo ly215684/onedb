@@ -27,6 +27,8 @@ const zh = {
     limit: '限制',
     prev: '上一页',
     next: '下一页',
+    copy: '复制',
+    copied: '已复制',
     starting: '正在启动 OneDB…'
   },
   status: {
@@ -198,6 +200,8 @@ const zh = {
     showColor: '显示数据库色标',
     showColorDesc: '在连接与标签上显示数据库类型颜色',
     defaultRows: '默认结果行数',
+    pageSize: '数据表分页大小',
+    pageSizeDesc: '打开数据表时每页显示的行数',
     language: '语言',
     langZh: '简体中文',
     langEn: 'English',
@@ -233,6 +237,8 @@ const en = {
     limit: 'Limit',
     prev: 'Prev',
     next: 'Next',
+    copy: 'Copy',
+    copied: 'Copied',
     starting: 'Starting OneDB…'
   },
   status: {
@@ -404,6 +410,8 @@ const en = {
     showColor: 'Show DB Color Labels',
     showColorDesc: 'Show database type colors on connections and tabs',
     defaultRows: 'Default Result Rows',
+    pageSize: 'Table Page Size',
+    pageSizeDesc: 'Rows per page when opening a data table',
     language: 'Language',
     langZh: '简体中文',
     langEn: 'English',
