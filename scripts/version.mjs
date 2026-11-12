@@ -56,16 +56,39 @@ if (next === oldVersion) {
   process.exit(1)
 }
 
+if (flags.has('--push') && !flags.has('--tag')) {
+  console.error('--push 需要与 --tag 一起使用')
+  process.exit(1)
+}
+
+const tag = `v${next}`
+
+if (flags.has('--tag')) {
+  // 发布前工作区必须干净，避免 tag 指向未提交的代码
+  const dirty = execSync('git status --porcelain', { encoding: 'utf8' }).trim()
+  if (dirty) {
+    console.error('工作区存在未提交改动，请先提交后再发布:')
+    console.error(dirty)
+    process.exit(1)
+  }
+  try {
+    execSync(`git rev-parse --verify --quiet refs/tags/${tag}`, { stdio: 'ignore' })
+    console.error(`标签 ${tag} 已存在，请换一个版本号`)
+    process.exit(1)
+  } catch {
+    // 标签不存在，继续
+  }
+}
+
 pkg.version = next
 writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8')
 console.log(`版本号已更新: ${oldVersion} -> ${next}`)
 
 if (flags.has('--tag')) {
-  const tag = `v${next}`
   try {
     execSync(`git add package.json`, { stdio: 'inherit' })
     execSync(`git commit -m "chore: release ${next}"`, { stdio: 'inherit' })
-    execSync(`git tag ${tag}`, { stdio: 'inherit' })
+    execSync(`git tag -a ${tag} -m "release ${tag}"`, { stdio: 'inherit' })
     console.log(`已创建提交并打标签: ${tag}`)
     if (flags.has('--push')) {
       // 远端不一定叫 origin（可能配置为其他别名），优先取当前分支跟踪的远端，否则回退 origin
