@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell, ipcMain } from 'electron'
 import { join } from 'path'
 import { dbManager } from './db'
 import { store } from './store'
+import { initUpdater, autoCheckForUpdates, checkForUpdates, downloadUpdate, installUpdate, getUpdateState } from './updater'
 import type { ConnectionConfig, QueryRequest, SchemaChange, PendingChange, AppSettings } from '../shared/types'
 
 function createWindow(): void {
@@ -107,11 +108,22 @@ function registerIpc(): void {
     store.saveSettings(s)
     return true
   })
+
+  // 自动更新
+  handle('update:state', () => getUpdateState())
+  handle('update:check', () => checkForUpdates())
+  handle('update:download', () => downloadUpdate())
+  handle('update:install', () => installUpdate())
+
+  // 应用信息
+  handle('app:version', () => app.getVersion())
 }
 
 app.whenReady().then(() => {
+  initUpdater()
   registerIpc()
   createWindow()
+  autoCheckForUpdates()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

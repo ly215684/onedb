@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AppSettings, ConnectionConfig, DbType } from '../../../shared/types'
+import type { AppSettings, ConnectionConfig, DbType, UpdateState } from '../../../shared/types'
 import { uid } from '../lib/dbMeta'
 
 export type TabKind = 'home' | 'sql' | 'data' | 'mongo' | 'redis' | 'structure' | 'er' | 'settings'
@@ -38,6 +38,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 interface AppState {
   ready: boolean
+  appVersion: string
   settings: AppSettings
   resolvedTheme: 'light' | 'dark'
   connections: ConnectionConfig[]
@@ -46,6 +47,7 @@ interface AppState {
   activeTabId: string
   quickConnect: { open: boolean; editing: ConnectionConfig | null; presetType: DbType | null }
   toasts: Toast[]
+  update: UpdateState
 
   init: () => Promise<void>
   applyTheme: (s: AppSettings) => void
@@ -64,6 +66,10 @@ interface AppState {
   setActiveTab: (id: string) => void
   updateTab: (id: string, patch: Partial<Tab>) => void
 
+  checkUpdate: () => Promise<void>
+  downloadUpdate: () => Promise<void>
+  installUpdate: () => Promise<void>
+
   toast: (kind: Toast['kind'], msg: string) => void
   dismissToast: (id: string) => void
 }
@@ -72,8 +78,13 @@ function systemDark(): boolean {
   return window.matchMedia('(prefers-color-scheme: dark)').matches
 }
 
+// 更新事件订阅（init 可能被重复调用，保留单份订阅）与已提示版本
+let unsubscribeUpdate: (() => void) | undefined
+let notifiedVersion: string | undefined
+
 export const useApp = create<AppState>((set, get) => ({
   ready: false,
+  appVersion: '',
   settings: DEFAULT_SETTINGS,
   resolvedTheme: 'light',
   connections: [],
@@ -82,10 +93,15 @@ export const useApp = create<AppState>((set, get) => ({
   activeTabId: 'home',
   quickConnect: { open: false, editing: null, presetType: null },
   toasts: [],
+  update: { status: 'idle', currentVersion: '' },
 
   async init() {
-    const settings = await window.onedb.settings.load().catch(() => DEFAULT_SETTINGS)
-    const connections = await window.onedb.conn.list().catch(() => [])
+    const [settings, connections, appVersion, initialState] = await Promise.all([
+      window.onedb.settings.load().catch(() => DEFAULT_SETTINGS),
+      window.onedb.conn.list().catch(() => []),
+      window.onedb.app.version().catch(() => ''),
+      window.onedb.updater.state().catch(() => null)
+    ])
     // 恢复仍在线的连接
     const connected: Record<string, string | undefined> = {}
     await Promise.all(
@@ -94,8 +110,28 @@ export const useApp = create<AppState>((set, get) => ({
         if (ok) connected[c.id] = undefined
       })
     )
+    unsubscribeUpdate?.()
+    unsubscribeUpdate = window.onedb.updater.onChanged((s) => {
+      set({ update: s })
+      // 自动检查发现新版本时提示用户（同一版本只提示一次）
+      if (s.status === 'available' && s.latestVersion && s.latestVersion !== notifiedVersion) {
+        notifiedVersion = s.latestVersion
+        const zh = get().settings.language === 'zh'
+        get().toast(
+          'info',
+          zh ? `发现新版本 v${s.latestVersion}，可在设置中下载更新` : `New version v${s.latestVersion} available — download it in Settings`
+        )
+      }
+    })
     get().applyTheme(settings)
-    set({ settings, connections, connected, ready: true })
+    set({
+      settings,
+      connections,
+      connected,
+      ready: true,
+      appVersion,
+      update: initialState ?? { status: 'idle', currentVersion: appVersion }
+    })
   },
 
   applyTheme(s) {
@@ -209,6 +245,34 @@ export const useApp = create<AppState>((set, get) => ({
 
   updateTab(id, patch) {
     set({ tabs: get().tabs.map((t) => (t.id === id ? { ...t, ...patch } : t)) })
+  },
+
+  async checkUpdate() {
+    try {
+      set({ update: { ...get().update, status: 'checking', error: undefined } })
+      const s = await window.onedb.updater.check()
+      set({ update: s })
+    } catch (e) {
+      get().toast('error', (e as Error).message)
+    }
+  },
+
+  async downloadUpdate() {
+    try {
+      set({ update: { ...get().update, status: 'downloading', percent: 0, error: undefined } })
+      const s = await window.onedb.updater.download()
+      set({ update: s })
+    } catch (e) {
+      get().toast('error', (e as Error).message)
+    }
+  },
+
+  async installUpdate() {
+    try {
+      await window.onedb.updater.install()
+    } catch (e) {
+      get().toast('error', (e as Error).message)
+    }
   },
 
   toast(kind, msg) {

@@ -1,11 +1,17 @@
 import { useState } from 'react'
-import { Sun, Moon, Monitor, Check, Type, Gauge, Languages, Save, Hash } from 'lucide-react'
+import { Sun, Moon, Monitor, Check, Type, Gauge, Languages, Save, Hash, Download, RefreshCw, RotateCcw } from 'lucide-react'
 import { useApp } from '../store/useApp'
 import { useT } from '../lib/i18n'
 import { Button, Toggle, Select, cx } from '../components/ui/primitives'
 import type { Density, ThemeMode } from '../../../shared/types'
 
 const ACCENTS = ['#3A66E2', '#008342', '#CD293C', '#E1A125', '#8A2EDD', '#22A2D9', '#2EB25E', '#F06292']
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 / 1024).toFixed(1)} MB`
+}
 
 const THEME_ICONS: Record<ThemeMode, React.ReactNode> = {
   light: <Sun size={16} />,
@@ -55,6 +61,27 @@ export function SettingsScreen(): React.JSX.Element {
     void app.saveSettings(patch)
     flash()
   }
+
+  const u = app.update
+  const version = u.currentVersion || app.appVersion
+  const updateStatusText = ((): string => {
+    switch (u.status) {
+      case 'checking':
+        return tx.settings.checking
+      case 'available':
+        return `${tx.settings.updateAvailable} v${u.latestVersion ?? ''}`
+      case 'not-available':
+        return tx.settings.upToDate
+      case 'downloading':
+        return `${tx.settings.downloading} ${Math.floor(u.percent ?? 0)}%`
+      case 'downloaded':
+        return tx.settings.downloadComplete
+      case 'error':
+        return u.error === 'dev-mode' ? tx.settings.devNotSupported : `${tx.settings.updateError}${u.error ? `: ${u.error}` : ''}`
+      default:
+        return tx.settings.updateIdle
+    }
+  })()
 
   return (
     <div className="h-full overflow-auto">
@@ -154,12 +181,70 @@ export function SettingsScreen(): React.JSX.Element {
           </div>
         </Section>
 
+        <Section icon={<Download size={16} />} title={tx.settings.update} desc={tx.settings.updateDesc}>
+          <div className="rounded-lg border border-line bg-surface px-4">
+            <Row label={tx.settings.currentVersion}>
+              <span className="font-code text-[12px] text-fg-muted">v{version}</span>
+            </Row>
+            <Row label={tx.settings.updateStatus} desc={updateStatusText}>
+              <div className="flex items-center gap-2">
+                {u.status === 'available' && (
+                  <Button size="sm" variant="primary" icon={<Download size={13} />} onClick={() => void app.downloadUpdate()}>
+                    {tx.settings.downloadUpdate}
+                  </Button>
+                )}
+                {u.status === 'downloaded' && (
+                  <Button size="sm" variant="primary" icon={<RotateCcw size={13} />} onClick={() => void app.installUpdate()}>
+                    {tx.settings.installNow}
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  icon={<RefreshCw size={13} className={cx(u.status === 'checking' && 'animate-spin')} />}
+                  disabled={u.status === 'checking' || u.status === 'downloading'}
+                  onClick={() => void app.checkUpdate()}
+                >
+                  {u.status === 'checking' ? tx.settings.checking : tx.settings.checkUpdate}
+                </Button>
+              </div>
+            </Row>
+            {u.status === 'downloading' && (
+              <div className="py-2.5">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-line-soft">
+                  <div
+                    className="h-full rounded-full bg-accent transition-all"
+                    style={{ width: `${Math.min(100, Math.max(0, u.percent ?? 0))}%` }}
+                  />
+                </div>
+                <div className="mt-1 flex justify-between text-[11px] text-fg-faint">
+                  <span>{Math.floor(u.percent ?? 0)}%</span>
+                  {u.transferred != null && u.total ? (
+                    <span>
+                      {formatBytes(u.transferred)} / {formatBytes(u.total)}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            )}
+            {u.status === 'available' && u.releaseNotes && (
+              <div className="border-t border-line-soft py-2.5">
+                <div className="mb-1 text-[11px] font-medium text-fg-muted">{tx.settings.releaseNotes}</div>
+                <pre className="max-h-40 overflow-auto whitespace-pre-wrap font-code text-[11px] leading-relaxed text-fg-muted">
+                  {u.releaseNotes}
+                </pre>
+              </div>
+            )}
+          </div>
+        </Section>
+
         <div className="flex items-center gap-3 border-t border-line pt-5">
           <Button variant="primary" icon={<Save size={14} />} onClick={() => void app.saveSettings({})}>
             {tx.settings.saveSettings}
           </Button>
           {saved && <span className="text-xs text-ok">{tx.settings.autoSaved}</span>}
-          <span className="ml-auto text-[11px] text-fg-faint">{tx.settings.footer}</span>
+          <span className="ml-auto text-[11px] text-fg-faint">
+            OneDB v{app.appVersion} · {tx.settings.footer}
+          </span>
         </div>
       </div>
     </div>

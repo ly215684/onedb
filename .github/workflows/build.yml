@@ -46,7 +46,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build (${{ matrix.script }})
-        # --publish never 已配置在 package.json 的 build.publish=null，无需命令行传参
+        # package.json 的 dist 脚本已固定 --publish never，发布由下方 release job 统一处理
         run: pnpm run ${{ matrix.script }}
 
       - name: Upload artifacts
@@ -82,11 +82,14 @@ jobs:
       - name: Create / Update Release
         uses: softprops/action-gh-release@v2
         with:
+          # *.yml / *.blockmap 是 electron-updater 的版本元数据与差量下载文件，必须一并发布
           files: |
             artifacts/**/*.exe
             artifacts/**/*.dmg
             artifacts/**/*.zip
             artifacts/**/*.AppImage
             artifacts/**/*.deb
+            artifacts/**/*.yml
+            artifacts/**/*.blockmap
           generate_release_notes: true
           fail_on_unmatched_files: true

@@ -3,7 +3,7 @@ import { useApp } from '../store/useApp'
 import { useT } from '../lib/i18n'
 
 export function StatusBar(): React.JSX.Element {
-  const { connections, connected, settings, tabs, activeTabId } = useApp()
+  const { connections, connected, settings, tabs, activeTabId, appVersion } = useApp()
   const t = useT()
   const onlineCount = Object.keys(connected).length
   const active = tabs.find((x) => x.id === activeTabId)
@@ -24,7 +24,7 @@ export function StatusBar(): React.JSX.Element {
       <div className="flex items-center gap-4">
         <span>{t.status.density[settings.density]}</span>
         <span className="flex items-center gap-1">
-          <CheckCircle2 size={12} className="text-ok" /> {t.status.version}
+          <CheckCircle2 size={12} className="text-ok" /> OneDB v{appVersion}
         </span>
       </div>
     </footer>

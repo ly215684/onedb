@@ -192,3 +192,20 @@ export interface AppSettings {
   defaultLimit: number
   defaultPageSize: number
 }
+
+// 自动更新
+export type UpdateStatus = 'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'downloaded' | 'error'
+export interface UpdateState {
+  status: UpdateStatus
+  currentVersion: string
+  latestVersion?: string
+  releaseDate?: string
+  releaseNotes?: string
+  // 下载进度（0-100 及字节信息）
+  percent?: number
+  transferred?: number
+  total?: number
+  bytesPerSecond?: number
+  // 打包构建外的开发环境会被直接拒绝，用 dev-mode 标记以便前端本地化
+  error?: string
+}

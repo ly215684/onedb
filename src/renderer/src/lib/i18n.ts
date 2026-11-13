@@ -33,8 +33,7 @@ const zh = {
   },
   status: {
     onlineCount: '连接在线',
-    density: { compact: '紧凑', comfy: '标准', large: '宽松' },
-    version: 'OneDB v0.1.0'
+    density: { compact: '紧凑', comfy: '标准', large: '宽松' }
   },
   home: {
     title: '连接总览',
@@ -207,7 +206,23 @@ const zh = {
     langEn: 'English',
     saveSettings: '保存设置',
     autoSaved: '已自动保存',
-    footer: 'OneDB v0.1.0 · Electron + React + Tailwind'
+    update: '软件更新',
+    updateDesc: '自动检查 GitHub Releases 上的新版本',
+    currentVersion: '当前版本',
+    updateStatus: '更新状态',
+    checkUpdate: '检查更新',
+    checking: '检查中…',
+    updateIdle: '尚未检查',
+    upToDate: '已是最新版本',
+    updateAvailable: '发现新版本',
+    downloadUpdate: '下载更新',
+    downloading: '下载中',
+    downloadComplete: '更新已下载，重启后安装',
+    installNow: '重启并安装',
+    updateError: '更新失败',
+    devNotSupported: '开发模式不支持自动更新，请使用打包后的版本',
+    releaseNotes: '更新说明',
+    footer: 'Electron + React + Tailwind'
   },
   toast: {
     connected: '已连接'
@@ -243,8 +258,7 @@ const en = {
   },
   status: {
     onlineCount: 'connections online',
-    density: { compact: 'Compact', comfy: 'Comfortable', large: 'Large' },
-    version: 'OneDB v0.1.0'
+    density: { compact: 'Compact', comfy: 'Comfortable', large: 'Large' }
   },
   home: {
     title: 'Connections',
@@ -417,7 +431,23 @@ const en = {
     langEn: 'English',
     saveSettings: 'Save Settings',
     autoSaved: 'Auto-saved',
-    footer: 'OneDB v0.1.0 · Electron + React + Tailwind'
+    update: 'Software Update',
+    updateDesc: 'Automatically check GitHub Releases for new versions',
+    currentVersion: 'Current Version',
+    updateStatus: 'Update Status',
+    checkUpdate: 'Check for Updates',
+    checking: 'Checking…',
+    updateIdle: 'Not checked yet',
+    upToDate: 'You are up to date',
+    updateAvailable: 'New version available',
+    downloadUpdate: 'Download Update',
+    downloading: 'Downloading',
+    downloadComplete: 'Update downloaded, restart to install',
+    installNow: 'Restart & Install',
+    updateError: 'Update failed',
+    devNotSupported: 'Auto-update is unavailable in dev mode; use a packaged build',
+    releaseNotes: 'Release Notes',
+    footer: 'Electron + React + Tailwind'
   },
   toast: {
     connected: 'connected'

@@ -11,7 +11,8 @@ import type {
   ERDiagram,
   MongoDocResult,
   RedisKeyInfo,
-  RedisValue
+  RedisValue,
+  UpdateState
 } from '../shared/types'
 
 interface Envelope<T> {
@@ -75,6 +76,21 @@ const api = {
   settings: {
     load: () => invoke<AppSettings>('settings:load'),
     save: (s: AppSettings) => invoke<boolean>('settings:save', s)
+  },
+  app: {
+    version: () => invoke<string>('app:version')
+  },
+  updater: {
+    state: () => invoke<UpdateState>('update:state'),
+    check: () => invoke<UpdateState>('update:check'),
+    download: () => invoke<UpdateState>('update:download'),
+    install: () => invoke<boolean>('update:install'),
+    // 主进程推送的更新状态；返回取消订阅函数
+    onChanged: (cb: (s: UpdateState) => void): (() => void) => {
+      const listener = (_e: unknown, s: UpdateState): void => cb(s)
+      ipcRenderer.on('update:changed', listener)
+      return () => ipcRenderer.removeListener('update:changed', listener)
+    }
   }
 }
 
