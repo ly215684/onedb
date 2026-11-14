@@ -14,13 +14,20 @@ import {
   RefreshCw,
   PlugZap,
   Power,
-  Circle
+  Circle,
+  Trash2,
+  Pencil,
+  Eraser,
+  FolderPlus
 } from 'lucide-react'
 import { isOnline, useApp } from '../store/useApp'
 import { DB_META, dbColor } from '../lib/dbMeta'
 import { useT, useShowDbColor } from '../lib/i18n'
 import type { ConnectionConfig, DbType } from '../../../shared/types'
 import { cx, IconButton } from './ui/primitives'
+import { ContextMenu, type MenuEntry } from './ui/ContextMenu'
+import { ConfirmDialog, PromptDialog } from './ui/dialogs'
+import { CreateTableModal } from '../screens/CreateTableModal'
 
 type NodeType = 'connection' | 'database' | 'schema' | 'table' | 'collection' | 'keyspace' | 'key' | 'index'
 
@@ -72,6 +79,22 @@ export function TreePanel(): React.JSX.Element {
   const [children, setChildren] = useState<Record<string, RawNode[]>>({})
   const [loading, setLoading] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
+  const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[] } | null>(null)
+  const [confirmState, setConfirmState] = useState<{
+    title: string
+    message: string
+    confirmText?: string
+    danger?: boolean
+    action: () => Promise<void>
+  } | null>(null)
+  const [promptState, setPromptState] = useState<{
+    title: string
+    label: string
+    initial?: string
+    confirmText?: string
+    onSubmit: (value: string) => Promise<void>
+  } | null>(null)
+  const [createTableNode, setCreateTableNode] = useState<RawNode | null>(null)
 
   const setLoad = (key: string, on: boolean): void => {
     setLoading((prev) => {
@@ -205,14 +228,86 @@ export function TreePanel(): React.JSX.Element {
     })
   }
 
-  async function expandConnection(conn: ConnectionConfig): Promise<void> {
-    const n: RawNode = {
-      key: `c:${conn.id}`,
-      label: conn.name,
-      type: 'connection',
-      connectionId: conn.id,
-      dbType: conn.type
+  function makeConnNode(conn: ConnectionConfig): RawNode {
+    return { key: `c:${conn.id}`, label: conn.name, type: 'connection', connectionId: conn.id, dbType: conn.type }
+  }
+
+  function dbNodeOf(n: RawNode): RawNode {
+    return {
+      key: `${n.connectionId}:db:${n.database}`,
+      label: n.database!,
+      type: 'database',
+      connectionId: n.connectionId,
+      dbType: n.dbType,
+      database: n.database
     }
+  }
+
+  function parentOf(n: RawNode): RawNode {
+    if (n.schema) {
+      return {
+        key: `${n.connectionId}:sc:${n.database}:${n.schema}`,
+        label: n.schema,
+        type: 'schema',
+        connectionId: n.connectionId,
+        dbType: n.dbType,
+        database: n.database,
+        schema: n.schema
+      }
+    }
+    return dbNodeOf(n)
+  }
+
+  /** 重新拉取父节点的子节点，避免使用失效缓存；可在清理后重新展开 */
+  async function reload(parent: RawNode, opts?: { purge?: string; expand?: boolean }): Promise<void> {
+    const wasOpen = expanded.has(parent.key) || !!opts?.expand
+    if (opts?.purge) invalidate(opts.purge)
+    setChildren((prev) => {
+      const next = { ...prev }
+      delete next[parent.key]
+      return next
+    })
+    if (!wasOpen) return
+    setLoad(parent.key, true)
+    try {
+      const kids = await loadChildren(parent)
+      setChildren((prev) => ({ ...prev, [parent.key]: kids }))
+      setExpanded((prev) => new Set(prev).add(parent.key))
+    } finally {
+      setLoad(parent.key, false)
+    }
+  }
+
+  function closeTabsFor(
+    connId: string,
+    db: string,
+    match?: { schema?: string; table?: string; collection?: string }
+  ): void {
+    for (const tab of app.tabs) {
+      if (tab.connectionId !== connId || tab.database !== db) continue
+      if (match && 'schema' in match && tab.schema !== match.schema) continue
+      if (match?.table !== undefined && tab.table !== match.table) continue
+      if (match?.collection !== undefined && tab.collection !== match.collection) continue
+      app.closeTab(tab.id)
+    }
+  }
+
+  function renameTabs(connId: string, db: string, oldName: string, newName: string, kind: 'table' | 'collection'): void {
+    for (const tab of app.tabs) {
+      if (tab.connectionId !== connId || tab.database !== db) continue
+      if (kind === 'table') {
+        if (tab.table !== oldName) continue
+        const title = tab.kind === 'structure' ? `${tx.data.structure} · ${newName}` : newName
+        app.updateTab(tab.id, { table: newName, title })
+      } else {
+        if (tab.collection !== oldName) continue
+        app.updateTab(tab.id, { collection: newName, title: newName })
+      }
+    }
+  }
+
+  async function expandConnection(conn: ConnectionConfig): Promise<void> {
+    const n = makeConnNode(conn)
     invalidate(conn.id)
     await ensureChildren(n)
     setExpanded((prev) => new Set(prev).add(n.key))
@@ -293,6 +388,260 @@ export function TreePanel(): React.JSX.Element {
     }
   }
 
+  function openMenu(e: React.MouseEvent, entries: MenuEntry[]): void {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!entries.length) return
+    setMenu({ x: e.clientX, y: e.clientY, entries })
+  }
+
+  function connectionMenu(conn: ConnectionConfig): MenuEntry[] {
+    const online = isOnline(app.connected, conn.id)
+    const entries: MenuEntry[] = []
+    if (online && (conn.type === 'mysql' || conn.type === 'postgres')) {
+      entries.push({
+        label: tx.menu.newDatabase,
+        icon: <FolderPlus size={13} />,
+        onSelect: () => {
+          setMenu(null)
+          setPromptState({
+            title: tx.menu.newDatabase,
+            label: tx.menu.dbName,
+            confirmText: tx.menu.create,
+            onSubmit: async (name) => {
+              await window.onedb.db.createDatabase(conn.id, name)
+              app.toast('success', `${tx.menu.created}: ${name}`)
+              await reload(makeConnNode(conn), { expand: true })
+            }
+          })
+        }
+      })
+    }
+    if (entries.length) entries.push({ separator: true })
+    entries.push({
+      label: tx.menu.deleteConnection,
+      icon: <Trash2 size={13} />,
+      danger: true,
+      onSelect: () => {
+        setMenu(null)
+        setConfirmState({
+          title: tx.menu.deleteConnection,
+          message: tx.menu.confirmDeleteConnection.replace('{name}', conn.name),
+          confirmText: tx.menu.deleteConnection,
+          danger: true,
+          action: async () => {
+            await app.removeConnection(conn.id)
+          }
+        })
+      }
+    })
+    return entries
+  }
+
+  function nodeMenu(n: RawNode): MenuEntry[] {
+    if (!isOnline(app.connected, n.connectionId)) return []
+    const mongo = n.dbType === 'mongo' || n.dbType === 'mongo-srv'
+
+    if (n.type === 'database') {
+      const entries: MenuEntry[] = []
+      if (mongo) {
+        entries.push({
+          label: tx.menu.newCollection,
+          icon: <Plus size={13} />,
+          onSelect: () => {
+            setMenu(null)
+            setPromptState({
+              title: tx.menu.newCollection,
+              label: tx.menu.collectionName,
+              confirmText: tx.menu.create,
+              onSubmit: async (name) => {
+                await window.onedb.mongo.createCollection(n.connectionId, n.database!, name)
+                app.toast('success', `${tx.menu.created}: ${name}`)
+                await reload(n)
+              }
+            })
+          }
+        })
+      } else if (n.dbType === 'mysql' || n.dbType === 'sqlite') {
+        entries.push({
+          label: tx.menu.newTable,
+          icon: <Table2 size={13} />,
+          onSelect: () => {
+            setMenu(null)
+            setCreateTableNode(n)
+          }
+        })
+      }
+      if (n.dbType !== 'sqlite') {
+        if (entries.length) entries.push({ separator: true })
+        entries.push({
+          label: tx.menu.dropDatabase,
+          icon: <Trash2 size={13} />,
+          danger: true,
+          onSelect: () => {
+            setMenu(null)
+            const conn = app.connections.find((c) => c.id === n.connectionId)
+            setConfirmState({
+              title: tx.menu.dropDatabase,
+              message: tx.menu.confirmDropDatabase.replace('{name}', n.label),
+              confirmText: tx.menu.dropDatabase,
+              danger: true,
+              action: async () => {
+                await window.onedb.db.dropDatabase(n.connectionId, n.database!)
+                closeTabsFor(n.connectionId, n.database!)
+                app.toast('success', `${tx.menu.dropped}: ${n.label}`)
+                if (conn) await reload(makeConnNode(conn), { purge: n.connectionId, expand: true })
+              }
+            })
+          }
+        })
+      }
+      return entries
+    }
+
+    if (n.type === 'schema') {
+      if (n.dbType !== 'postgres') return []
+      return [
+        {
+          label: tx.menu.newTable,
+          icon: <Table2 size={13} />,
+          onSelect: () => {
+            setMenu(null)
+            setCreateTableNode(n)
+          }
+        }
+      ]
+    }
+
+    if (n.type === 'table') {
+      const parent = parentOf(n)
+      return [
+        {
+          label: tx.menu.renameTable,
+          icon: <Pencil size={13} />,
+          onSelect: () => {
+            setMenu(null)
+            setPromptState({
+              title: tx.menu.renameTable,
+              label: tx.menu.newName,
+              initial: n.label,
+              confirmText: tx.menu.rename,
+              onSubmit: async (newName) => {
+                if (newName === n.label) return
+                await window.onedb.db.renameTable(n.connectionId, n.database!, n.schema, n.label, newName)
+                renameTabs(n.connectionId, n.database!, n.label, newName, 'table')
+                app.toast('success', `${tx.menu.renamed}: ${newName}`)
+                await reload(parent)
+              }
+            })
+          }
+        },
+        { separator: true },
+        {
+          label: tx.menu.truncateTable,
+          icon: <Eraser size={13} />,
+          onSelect: () => {
+            setMenu(null)
+            setConfirmState({
+              title: tx.menu.truncateTable,
+              message: tx.menu.confirmTruncateTable.replace('{name}', n.label),
+              confirmText: tx.menu.truncateTable,
+              action: async () => {
+                await window.onedb.db.truncateTable(n.connectionId, n.database!, n.schema, n.label)
+                app.toast('success', `${tx.menu.truncated}: ${n.label}`)
+              }
+            })
+          }
+        },
+        {
+          label: tx.menu.dropTable,
+          icon: <Trash2 size={13} />,
+          danger: true,
+          onSelect: () => {
+            setMenu(null)
+            setConfirmState({
+              title: tx.menu.dropTable,
+              message: tx.menu.confirmDropTable.replace('{name}', n.label),
+              confirmText: tx.menu.dropTable,
+              danger: true,
+              action: async () => {
+                await window.onedb.db.dropTable(n.connectionId, n.database!, n.schema, n.label)
+                closeTabsFor(n.connectionId, n.database!, { schema: n.schema, table: n.label })
+                app.toast('success', `${tx.menu.dropped}: ${n.label}`)
+                await reload(parent)
+              }
+            })
+          }
+        }
+      ]
+    }
+
+    if (n.type === 'collection') {
+      const parent = dbNodeOf(n)
+      return [
+        {
+          label: tx.menu.renameCollection,
+          icon: <Pencil size={13} />,
+          onSelect: () => {
+            setMenu(null)
+            setPromptState({
+              title: tx.menu.renameCollection,
+              label: tx.menu.newName,
+              initial: n.label,
+              confirmText: tx.menu.rename,
+              onSubmit: async (newName) => {
+                if (newName === n.label) return
+                await window.onedb.mongo.renameCollection(n.connectionId, n.database!, n.label, newName)
+                renameTabs(n.connectionId, n.database!, n.label, newName, 'collection')
+                app.toast('success', `${tx.menu.renamed}: ${newName}`)
+                await reload(parent)
+              }
+            })
+          }
+        },
+        { separator: true },
+        {
+          label: tx.menu.clearCollection,
+          icon: <Eraser size={13} />,
+          onSelect: () => {
+            setMenu(null)
+            setConfirmState({
+              title: tx.menu.clearCollection,
+              message: tx.menu.confirmClearCollection.replace('{name}', n.label),
+              confirmText: tx.menu.clearCollection,
+              action: async () => {
+                await window.onedb.mongo.clearCollection(n.connectionId, n.database!, n.label)
+                app.toast('success', `${tx.menu.cleared}: ${n.label}`)
+              }
+            })
+          }
+        },
+        {
+          label: tx.menu.dropCollection,
+          icon: <Trash2 size={13} />,
+          danger: true,
+          onSelect: () => {
+            setMenu(null)
+            setConfirmState({
+              title: tx.menu.dropCollection,
+              message: tx.menu.confirmDropCollection.replace('{name}', n.label),
+              confirmText: tx.menu.dropCollection,
+              danger: true,
+              action: async () => {
+                await window.onedb.mongo.dropCollection(n.connectionId, n.database!, n.label)
+                closeTabsFor(n.connectionId, n.database!, { collection: n.label })
+                app.toast('success', `${tx.menu.dropped}: ${n.label}`)
+                await reload(parent)
+              }
+            })
+          }
+        }
+      ]
+    }
+
+    return []
+  }
+
   function renderRow(n: RawNode, depth: number): ReactNode {
     const open = expanded.has(n.key)
     const loadingKids = loading.has(n.key)
@@ -331,6 +680,7 @@ export function TreePanel(): React.JSX.Element {
           )}
           style={{ paddingLeft: depth * 14 + 6 }}
           onClick={click}
+          onContextMenu={(e) => openMenu(e, nodeMenu(n))}
         >
           <span className="flex h-4 w-4 shrink-0 items-center justify-center text-fg-faint">
             {expandable ? (
@@ -393,7 +743,8 @@ export function TreePanel(): React.JSX.Element {
   }
 
   return (
-    <aside className="flex w-[280px] shrink-0 flex-col border-r border-line bg-surface">
+    <>
+      <aside className="flex w-[280px] shrink-0 flex-col border-r border-line bg-surface">
       <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
         <span className="text-xs font-semibold uppercase tracking-wider text-fg-muted">{tx.nav.explorer}</span>
         <IconButton className="h-6 w-6" title={tx.nav.newConnection} onClick={() => app.openQuickConnect()}>
@@ -441,6 +792,7 @@ export function TreePanel(): React.JSX.Element {
                   className="group flex h-[var(--h-tree)] cursor-pointer items-center gap-1.5 rounded pr-1 text-[13px] hover:bg-canvas"
                   style={{ paddingLeft: 6 }}
                   onClick={() => void onConnection(conn)}
+                  onContextMenu={(e) => openMenu(e, connectionMenu(conn))}
                 >
                   <ChevronRight
                     size={13}
@@ -470,7 +822,47 @@ export function TreePanel(): React.JSX.Element {
             )
           })}
       </div>
-    </aside>
+      </aside>
+
+      {menu && (
+        <ContextMenu x={menu.x} y={menu.y} entries={menu.entries} onClose={() => setMenu(null)} />
+      )}
+      {confirmState && (
+        <ConfirmDialog
+          title={confirmState.title}
+          message={confirmState.message}
+          confirmText={confirmState.confirmText}
+          danger={confirmState.danger}
+          onConfirm={confirmState.action}
+          onClose={() => setConfirmState(null)}
+        />
+      )}
+      {promptState && (
+        <PromptDialog
+          title={promptState.title}
+          label={promptState.label}
+          initial={promptState.initial}
+          confirmText={promptState.confirmText}
+          onSubmit={promptState.onSubmit}
+          onClose={() => setPromptState(null)}
+        />
+      )}
+      {createTableNode && (
+        <CreateTableModal
+          connectionId={createTableNode.connectionId}
+          dbType={createTableNode.dbType}
+          database={createTableNode.database!}
+          schema={createTableNode.schema}
+          onClose={() => setCreateTableNode(null)}
+          onCreated={async (table) => {
+            const parent = createTableNode
+            setCreateTableNode(null)
+            app.toast('success', `${tx.menu.created}: ${table}`)
+            await reload(parent)
+          }}
+        />
+      )}
+    </>
   )
 }
 

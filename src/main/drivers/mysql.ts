@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise'
 import type { Connection } from 'mysql2/promise'
-import type { QueryResult, TableSchema, ColumnDef, IndexDef, ForeignKeyDef } from '../../shared/types'
+import type { QueryResult, TableSchema, ColumnDef, IndexDef, ForeignKeyDef, CreateTableSpec } from '../../shared/types'
 import type { RelationalDriver } from './driver'
 
 export class MysqlDriver implements RelationalDriver {
@@ -185,6 +185,43 @@ export class MysqlDriver implements RelationalDriver {
       await this.conn.rollback().catch(() => {})
       throw e
     }
+  }
+
+  // ---- 库表管理 ----
+  async createDatabase(name: string): Promise<void> {
+    await this.conn.query(`CREATE DATABASE IF NOT EXISTS ${this.quoteIdent(name)}`)
+  }
+
+  async dropDatabase(name: string): Promise<void> {
+    await this.conn.query(`DROP DATABASE IF EXISTS ${this.quoteIdent(name)}`)
+  }
+
+  async createTable(db: string, _schema: string | undefined, spec: CreateTableSpec): Promise<void> {
+    const t = `${this.quoteIdent(db)}.${this.quoteIdent(spec.name)}`
+    const defs = spec.columns.map((c) => {
+      let s = `${this.quoteIdent(c.name)} ${c.type}`
+      s += c.nullable ? ' NULL' : ' NOT NULL'
+      if (c.autoIncrement) s += ' AUTO_INCREMENT'
+      else if (c.defaultValue != null && c.defaultValue !== '') s += ` DEFAULT ${c.defaultValue}`
+      return s
+    })
+    const pks = spec.columns.filter((c) => c.primary).map((c) => this.quoteIdent(c.name))
+    if (pks.length) defs.push(`PRIMARY KEY (${pks.join(', ')})`)
+    await this.conn.query(`CREATE TABLE ${t} (${defs.join(', ')})`)
+  }
+
+  async dropTable(db: string, _schema: string | undefined, table: string): Promise<void> {
+    await this.conn.query(`DROP TABLE ${this.quoteIdent(db)}.${this.quoteIdent(table)}`)
+  }
+
+  async truncateTable(db: string, _schema: string | undefined, table: string): Promise<void> {
+    await this.conn.query(`TRUNCATE TABLE ${this.quoteIdent(db)}.${this.quoteIdent(table)}`)
+  }
+
+  async renameTable(db: string, _schema: string | undefined, oldName: string, newName: string): Promise<void> {
+    await this.conn.query(
+      `RENAME TABLE ${this.quoteIdent(db)}.${this.quoteIdent(oldName)} TO ${this.quoteIdent(db)}.${this.quoteIdent(newName)}`
+    )
   }
 
   async close(): Promise<void> {

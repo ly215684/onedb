@@ -98,6 +98,27 @@ export class MongoDriver {
     return r.deletedCount ?? 0
   }
 
+  // ---- 集合 / 数据库管理 ----
+  async createCollection(db: string, name: string): Promise<void> {
+    await this.client.db(db).createCollection(name)
+  }
+
+  async dropCollection(db: string, name: string): Promise<void> {
+    await this.client.db(db).collection(name).drop()
+  }
+
+  async clearCollection(db: string, name: string): Promise<void> {
+    await this.client.db(db).collection(name).deleteMany({})
+  }
+
+  async renameCollection(db: string, oldName: string, newName: string): Promise<void> {
+    await this.client.db(db).collection(oldName).rename(newName)
+  }
+
+  async dropDatabase(db: string): Promise<void> {
+    await this.client.db(db).dropDatabase()
+  }
+
   async close(): Promise<void> {
     await this.client.close()
   }

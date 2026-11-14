@@ -116,6 +116,20 @@ export interface SchemaChange {
   modified: TableSchema
 }
 
+// 新建数据表
+export interface CreateTableColumn {
+  name: string
+  type: string
+  nullable: boolean
+  primary?: boolean
+  autoIncrement?: boolean
+  defaultValue?: string | null
+}
+export interface CreateTableSpec {
+  name: string
+  columns: CreateTableColumn[]
+}
+
 // 数据网格编辑
 export interface CellPos {
   row: number

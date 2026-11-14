@@ -1,0 +1,307 @@
+# 资源管理器右键菜单实现方案
+
+## 一、目标与范围
+
+在左侧「资源管理器」树（[TreePanel.tsx](file:///c:/Users/ly/Desktop/code/onedb/src/renderer/src/components/TreePanel.tsx)）上增加右键菜单，支持：
+
+- 删除连接
+- 新建数据库 / 删除数据库（MySQL、PostgreSQL、MongoDB）
+- 新建数据表 / 重命名数据表 / 清空数据表 / 删除数据表（MySQL、PostgreSQL、SQLite）
+- 新建集合 / 重命名集合 / 清空集合 / 删除集合（MongoDB，集合视为表）
+- Redis 的 keyspace/key 节点不提供本次菜单（用户确认：关系型 + MongoDB）
+
+新建表采用 Navicat 风格：弹窗中填写表名，并可增删列（列名、类型、可空、主键、自增、默认值）。
+
+破坏性操作（删连接/删库/删表/清空表/删集合/清空集合）统一弹二次确认框。
+
+## 二、现状分析
+
+### 前端
+
+- [TreePanel.tsx](file:///c:/Users/ly/Desktop/code/onedb/src/renderer/src/components/TreePanel.tsx#L25-L36)：`RawNode` 定义节点类型 `connection | database | schema | table | collection | keyspace | key | index`，携带 `connectionId / dbType / database / schema / redisDb`。
+- 节点 key 格式（用于缓存与刷新）：
+  - 连接：`c:<connId>`
+  - 数据库：`<connId>:db:<db>`
+  - Schema：`<connId>:sc:<db>:<schema>`
+  - 表（无 schema）：`<connId>:tb:<db>::<table>`；有 schema：`<connId>:tb:<db>:<schema>:<table>`
+  - 集合：`<connId>:col:<db>:<collection>`
+- 懒加载在 [loadChildren](file:///c:/Users/ly/Desktop/code/onedb/src/renderer/src/components/TreePanel.tsx#L84-L170)，缓存于 `children` state；[invalidate](file:///c:/Users/ly/Desktop/code/onedb/src/renderer/src/components/TreePanel.tsx#L195-L206) 可按前缀清理缓存。
+- 行渲染在 [renderRow](file:///c:/Users/ly/Desktop/code/onedb/src/renderer/src/components/TreePanel.tsx#L296-L390)，当前仅有悬停快捷按钮，无右键处理；连接行在 L439-L467。
+- 全局状态 [useApp.ts](file:///c:/Users/ly/Desktop/code/onedb/src/renderer/src/store/useApp.ts)：`removeConnection`（L162-L170）、`closeTab`（L230-L240）、`updateTab`（L246-L248）、`toast`（L278-L282）。
+- UI 基础组件 [primitives.tsx](file:///c:/Users/ly/Desktop/code/onedb/src/renderer/src/components/ui/primitives.tsx)：已有 `Modal`、`Button`、`Input`、`IconButton`、`cx`、`Field`、`Toggle`，无右键菜单/确认框组件。
+- i18n [i18n.ts](file:///c:/Users/ly/Desktop/code/onedb/src/renderer/src/lib/i18n.ts)：`zh` 为形状基准，`en` 用 `satisfies typeof zh`，新增 key 必须两边同步；占位符用 `.replace('{name}', ...)`。
+- API 类型：`window.onedb` 由 [index.d.ts](file:///c:/Users/ly/Desktop/code/onedb/src/preload/index.d.ts) + `OneDBApi` 自动推导，改 preload 即可获得类型。
+
+### 后端（Electron 主进程）
+
+- IPC 注册：[index.ts](file:///c:/Users/ly/Desktop/code/onedb/src/main/index.ts#L56-L120)，`handle()` 统一返回 `{ ok, data | error }`。
+- 连接管理：[db.ts](file:///c:/Users/ly/Desktop/code/onedb/src/main/db.ts) 的 `DBManager`，已有 tree/sql/mongo/redis 方法。
+- 驱动接口：[driver.ts](file:///c:/Users/ly/Desktop/code/onedb/src/main/drivers/driver.ts) 中 `RelationalDriver` 目前只有查询/结构/DML 能力，没有 DDL 库表管理方法。
+- 各驱动已有 `quoteIdent` 与 DDL 生成参考（[mysql.ts](file:///c:/Users/ly/Desktop/code/onedb/src/main/drivers/mysql.ts#L122-L171)、[postgres.ts](file:///c:/Users/ly/Desktop/code/onedb/src/main/drivers/postgres.ts#L124-L159)、[sqlite.ts](file:///c:/Users/ly/Desktop/code/onedb/src/main/drivers/sqlite.ts#L111-L129)）。
+- [mongo.ts](file:///c:/Users/ly/Desktop/code/onedb/src/main/drivers/mongo.ts) 仅有集合查询/文档增删改，无集合 drop/rename/clear。
+
+## 三、菜单矩阵（决策）
+
+| 节点 | 在线条件 | 菜单项 |
+| --- | --- | --- |
+| 连接 | 始终 | 删除连接；连接在线且为 MySQL/PostgreSQL 时额外「新建数据库」 |
+| 数据库（MySQL/SQLite） | 在线 | 新建数据表、删除数据库（SQLite 隐藏删除数据库） |
+| 数据库（PostgreSQL） | 在线 | 删除数据库（建表在 schema 节点上） |
+| 数据库（MongoDB） | 在线 | 新建集合、删除数据库 |
+| Schema（PostgreSQL） | 在线 | 新建数据表 |
+| 表 | 在线 | 重命名数据表、清空数据表、删除数据表 |
+| 集合（MongoDB） | 在线 | 重命名集合、清空集合、删除集合 |
+| keyspace / key / index | — | 不显示菜单 |
+
+说明：非连接节点只有在连接后才能出现在树中，仍以 `isOnline(app.connected, n.connectionId)` 兜底，离线则不弹菜单。
+
+## 四、后端改动
+
+### 1. `src/shared/types.ts`
+
+新增（供 IPC 与 UI 共享）：
+
+```ts
+export interface CreateTableColumn {
+  name: string
+  type: string
+  nullable: boolean
+  primary?: boolean
+  autoIncrement?: boolean
+  defaultValue?: string | null
+}
+
+export interface CreateTableSpec {
+  name: string
+  columns: CreateTableColumn[]
+}
+```
+
+### 2. `src/main/drivers/driver.ts`
+
+在 `RelationalDriver` 中新增方法（所有实现类必须补齐）：
+
+```ts
+createDatabase(name: string): Promise<void>
+dropDatabase(name: string): Promise<void>
+createTable(db: string, schema: string | undefined, spec: CreateTableSpec): Promise<void>
+dropTable(db: string, schema: string | undefined, table: string): Promise<void>
+truncateTable(db: string, schema: string | undefined, table: string): Promise<void>
+renameTable(db: string, schema: string | undefined, oldName: string, newName: string): Promise<void>
+```
+
+### 3. 驱动实现
+
+**MySQL**（`mysql.ts`），全部使用 `quoteIdent`：
+
+- `createDatabase`：`CREATE DATABASE IF NOT EXISTS \`name\``
+- `dropDatabase`：`DROP DATABASE IF EXISTS \`name\``
+- `createTable`：``CREATE TABLE `db`.`t` (cols..., PRIMARY KEY (...))``；列定义为 `\`col\` <type> NULL/NOT NULL`，`autoIncrement` 追加 `AUTO_INCREMENT`，否则 `defaultValue` 非空时追加 `DEFAULT <raw>`
+- `dropTable`：``DROP TABLE `db`.`t` ``
+- `truncateTable`：``TRUNCATE TABLE `db`.`t` ``
+- `renameTable`：``RENAME TABLE `db`.`old` TO `db`.`new` ``
+
+**PostgreSQL**（`postgres.ts`），表默认 schema 为 `public`：
+
+- `createDatabase`：`CREATE DATABASE "name"`（相比 `IF NOT EXISTS`，PG 不支持，冲突时由错误 toast 提示）
+- `dropDatabase`：`DROP DATABASE IF EXISTS "name"`（若删除当前连接默认库会失败，错误回显即可）
+- `createTable`：`CREATE TABLE "schema"."t" (...)`；`autoIncrement` 追加 `GENERATED BY DEFAULT AS IDENTITY`（此时忽略 defaultValue），`NOT NULL` 按列配置，其余列 `DEFAULT <raw>`；主键用表级 `PRIMARY KEY (...)`
+- `dropTable`：`DROP TABLE "schema"."t"`
+- `truncateTable`：`TRUNCATE TABLE "schema"."t"`
+- `renameTable`：`ALTER TABLE "schema"."old" RENAME TO "new"`（新名不限定 schema）
+
+**SQLite**（`sqlite.ts`）：
+
+- `createDatabase` / `dropDatabase`：抛出 `SQLite 不支持创建/删除数据库`
+- `createTable`：`CREATE TABLE "t" (...)`；`autoIncrement` 时强制列定义为 `"col" INTEGER PRIMARY KEY AUTOINCREMENT`（忽略 type/default）；其余列 `NOT NULL` + `DEFAULT <raw>`；非自增主键用表级 `PRIMARY KEY (...)`
+- `dropTable`：`DROP TABLE "t"`
+- `truncateTable`：`DELETE FROM "t"`（等价清空数据）
+- `renameTable`：`ALTER TABLE "old" RENAME TO "new"`
+- 以上写操作后调用现有 `persist()` 落盘
+
+**MongoDB**（`mongo.ts`）新增：
+
+- `createCollection(db, name)` → `db(name).createCollection(name)`
+- `dropCollection(db, name)` → `collection(name).drop()`
+- `clearCollection(db, name)` → `collection(name).deleteMany({})`
+- `renameCollection(db, oldName, newName)` → `collection(oldName).rename(newName)`（目标已存在时由驱动报错）
+- `dropDatabase(db)` → `db(db).dropDatabase()`
+
+### 4. `src/main/db.ts`（DBManager 包装）
+
+新增方法（每个先 `this.get(id)`，再按 `relational` / `mongo` 分派，缺失则抛「该连接不支持此操作」）：
+
+- `createDatabase(id, name)`、`dropDatabase(id, db)`
+- `createTable(id, db, schema, spec)`、`dropTable(...)`、`truncateTable(...)`、`renameTable(...)`
+- `createCollection(id, db, name)`、`dropCollection(...)`、`clearCollection(...)`、`renameCollection(...)`
+
+### 5. `src/main/index.ts` — 注册 IPC
+
+```ts
+// 库表结构管理
+handle('db:createDatabase', (id: string, name: string) => dbManager.createDatabase(id, name))
+handle('db:dropDatabase', (id: string, db: string) => dbManager.dropDatabase(id, db))
+handle('db:createTable', (id, db, schema, spec) => dbManager.createTable(id, db, schema, spec))
+handle('db:dropTable', (id, db, schema, table) => dbManager.dropTable(id, db, schema, table))
+handle('db:truncateTable', (id, db, schema, table) => dbManager.truncateTable(id, db, schema, table))
+handle('db:renameTable', (id, db, schema, oldName, newName) => dbManager.renameTable(id, db, schema, oldName, newName))
+// Mongo 集合
+handle('mongo:createCollection', (id, db, name) => dbManager.createCollection(id, db, name))
+handle('mongo:dropCollection', (id, db, name) => dbManager.dropCollection(id, db, name))
+handle('mongo:clearCollection', (id, db, name) => dbManager.clearCollection(id, db, name))
+handle('mongo:renameCollection', (id, db, oldName, newName) => dbManager.renameCollection(id, db, oldName, newName))
+handle('mongo:dropDatabase', (id, db) => dbManager.dropDatabase(id, db))
+```
+
+### 6. `src/preload/index.ts`
+
+- 新增 `db` 命名空间：`createDatabase`、`dropDatabase`、`createTable`、`dropTable`、`truncateTable`、`renameTable`（均 `invoke<void>`）。
+- 在 `mongo` 命名空间追加 `createCollection`、`dropCollection`、`clearCollection`、`renameCollection`、`dropDatabase`。
+- 类型经 `OneDBApi` 自动传导到渲染层，无需手改 `index.d.ts`。
+
+## 五、前端改动
+
+### 1. 新增 `src/renderer/src/components/ui/ContextMenu.tsx`
+
+通用右键菜单组件：
+
+```ts
+export interface MenuItem { label: string; icon?: ReactNode; danger?: boolean; disabled?: boolean; onSelect: () => void }
+export type MenuEntry = MenuItem | { separator: true }
+export function ContextMenu({ x, y, entries, onClose }: { x: number; y: number; entries: MenuEntry[]; onClose: () => void }): JSX.Element | null
+```
+
+- 用 `createPortal` 挂到 `document.body`，`position: fixed`、`z-[70]`，避免被 `aside` 的 `overflow-auto` 裁剪。
+- 位置钳制：菜单宽约 200px、每项约 30px，超出视口时向左/向上贴边。
+- 关闭时机：外部 `mousedown`、`Escape`、`resize`、任意滚动（capture）、再次右键。
+- 样式沿用现有 token：`bg-raised border-line shadow-xl rounded-md`，danger 项 `text-bad hover:bg-bad/10`。
+
+### 2. 新增 `src/renderer/src/components/ui/dialogs.tsx`
+
+- `ConfirmDialog`：props `{ title, message, confirmText?, danger?, onConfirm: () => Promise<void>, onClose }`，内部 `busy` 状态，确认后 await，抛错时在弹窗内显示错误文本，不自动关闭。
+- `PromptDialog`：props `{ title, label, initial?, placeholder?, confirmText?, onSubmit: (value: string) => Promise<void>, onClose }`，输入框自动聚焦、Enter 提交、空值禁用；错误同样展示在弹窗内。
+- 两者复用 `Modal` + `Button` + `Input` + `Field`。
+
+### 3. 新增 `src/renderer/src/screens/CreateTableModal.tsx`
+
+Navicat 风格建表弹窗，props：
+
+```ts
+{ connectionId: string; dbType: DbType; database: string; schema?: string
+  onClose: () => void; onCreated: (table: string) => void }
+```
+
+- 表名字段 + 列编辑器（表头：列名 / 类型 / 可空 / 主键 / 自增 / 默认值 / 删除）。
+- 初始一行 `id`：类型按 dbType 取默认（MySQL `BIGINT`、PG `bigint`、SQLite `INTEGER`），不可空、主键、自增。
+- 「添加列」按钮追加空白行；每行可删除，但至少保留一行。
+- 类型输入用 `Input` + `<datalist>`，候选：MySQL `INT/BIGINT/VARCHAR(255)/TEXT/DECIMAL(10,2)/DATETIME/TIMESTAMP/BOOLEAN/JSON`；PG `integer/bigint/text/varchar(255)/numeric(10,2)/timestamp/boolean/jsonb/uuid`；SQLite `INTEGER/TEXT/REAL/BLOB/NUMERIC`。
+- 校验：表名必填；每列列名必填且不重复；类型必填；SQLite 勾选自增时自动将类型置为 `INTEGER` 并勾选主键；自增自动勾选主键。
+- 提交调用 `window.onedb.db.createTable(connectionId, database, schema, { name, columns })`，成功后 `onCreated(name)` 并关闭；失败在弹窗内展示错误。
+- 通过 `Modal` 的 `width={720}` 展示。
+
+### 4. 修改 `src/renderer/src/components/TreePanel.tsx`
+
+**新增状态：**
+
+```ts
+const [menu, setMenu] = useState<{ x: number; y: number; entries: MenuEntry[] } | null>(null)
+const [confirmState, setConfirmState] = useState<{ title; message; danger?; confirmText?; action: () => Promise<void> } | null>(null)
+const [promptState, setPromptState] = useState<{ title; label; initial?; confirmText?; onSubmit: (v: string) => Promise<void> } | null>(null)
+const [createTableNode, setCreateTableNode] = useState<RawNode | null>(null)
+```
+
+**刷新辅助 `reload(parent, opts?)`**（替代现有的 stale-closure 风险用法）：
+
+```ts
+async function reload(parent: RawNode, opts?: { purge?: string; expand?: boolean }) {
+  const wasOpen = expanded.has(parent.key)
+  if (opts?.purge) invalidate(opts.purge)              // 清掉该连接/库下的深层缓存与展开状态
+  setChildren((prev) => { const n = { ...prev }; delete n[parent.key]; return n })
+  if (!wasOpen && !opts?.expand) return
+  setLoad(parent.key, true)
+  const kids = await loadChildren(parent)
+  setChildren((prev) => ({ ...prev, [parent.key]: kids }))
+  setLoad(parent.key, false)
+  setExpanded((prev) => new Set(prev).add(parent.key))
+}
+```
+
+> `loadChildren` 直接请求后端，不读 `children` 缓存，因此可规避 `ensureChildren` 闭包读取旧缓存的问题。
+
+**父子节点推导与页签联动：**
+
+- `parentOf(n)`：表节点有 `schema` → 构造 schema 节点 `{ key: <id>:sc:<db>:<schema>, label: schema, type:'schema', ... }`；否则构造 database 节点。
+- `toNode(conn)` / `dbNode(n)` / `connNode(conn)` 用于构造连接/数据库节点。
+- `closeTabsFor(connId, db, opts?: { schema?; table?; collection? })`：遍历 `app.tabs`，命中的调用 `app.closeTab(t.id)`（删表、删集合、删库时使用）。
+- `renameTabs(...)`：重命名表/集合后遍历 `app.tabs` 更新 `table` 或 `collection` 字段；`kind === 'structure'` 的页签标题同步为 `${tx.data.structure} · newName`，数据页签标题同步为 `newName`。
+
+**菜单项构造：**
+
+```ts
+function connectionMenu(conn: ConnectionConfig, online: boolean): MenuEntry[]
+function nodeMenu(n: RawNode): MenuEntry[]
+```
+
+- `connectionMenu`：`删除连接`（confirm，danger，`app.removeConnection(conn.id)`）；`online && (mysql|postgres)` 追加 `新建数据库`（PromptDialog → `db.createDatabase` → `reload(connNode, { expand: true })`）。
+- 数据库节点：
+  - mongo：`新建集合`（Prompt → `mongo.createCollection` → `reload(n)`）
+  - MySQL/SQLite：`新建数据表`（`setCreateTableNode(n)`）
+  - 非 SQLite：`删除数据库`（confirm，danger；`closeTabsFor` 后 `db.dropDatabase`，再 `reload(connNode, { purge: connId, expand: true })`）
+- schema 节点（PG）：`新建数据表`。
+- table 节点：`重命名数据表`（Prompt，initial 为当前名 → `db.renameTable` → renameTabs → `reload(parentOf(n))`）、`清空数据表`（confirm → `db.truncateTable`，不刷新树）、`删除数据表`（confirm，danger → `closeTabsFor` → `db.dropTable` → `reload(parentOf(n))`）。
+- collection 节点：`重命名集合`、`清空集合`（`clearCollection`）、`删除集合`（danger，`closeTabsFor` + `reload(dbNode)`）。
+- 成功统一 `app.toast('success', ...)`，失败 `app.toast('error', (e as Error).message)`；弹窗内的错误由 `ConfirmDialog/PromptDialog` 自身展示。
+- 每个菜单项 `onSelect` 先 `setMenu(null)` 再执行。
+
+**右键绑定：**
+
+- 连接行 `onContextMenu={(e) => openMenu(e, connectionMenu(conn, online))}`。
+- `renderRow` 的节点行 `onContextMenu={(e) => openMenu(e, nodeMenu(n))}`；`openMenu` 内 `preventDefault` + `stopPropagation`。
+- 在组件返回的 `<aside>` 之后（同一 Fragment）渲染：
+  - `{menu && <ContextMenu x={menu.x} y={menu.y} entries={menu.entries} onClose={() => setMenu(null)} />}`
+  - `{confirmState && <ConfirmDialog ... />}`
+  - `{promptState && <PromptDialog ... />}`
+  - `{createTableNode && <CreateTableModal ... onCreated={async (t) => { setCreateTableNode(null); await reload(createTableNode); app.toast('success', ...) }} />}`
+
+### 5. `src/renderer/src/lib/i18n.ts`
+
+`zh` / `en` 同步新增 `menu` 段（键保持一致，`en` 仍 `satisfies typeof zh`）：
+
+- 操作：`deleteConnection / newDatabase / newTable / newCollection / renameTable / renameCollection / truncateTable / clearCollection / dropTable / dropCollection / dropDatabase`
+- 弹窗字段：`dbName / tableName / collectionName / newName / columns / colName / colType / nullable / primary / autoInc / defaultValue / addColumn / deleteColumn / create / rename / cancel`（`cancel` 复用 `common.cancel`）
+- 校验与确认文案：`nameRequired / duplicateColumn / typeRequired`，以及 `confirmDeleteConnection / confirmDropDatabase / confirmTruncateTable / confirmDropTable / confirmClearCollection / confirmDropCollection`（均含 `{name}` 占位）
+- 成功提示：`created / renamed / truncated / cleared / dropped`
+
+## 六、关键实现细节与边界
+
+1. **引用标识**：一律使用驱动已有的 `quoteIdent`，避免库表名含特殊字符/关键字失败。
+2. **默认值输入**：`defaultValue` 原样拼接到 DDL（支持 `0`、`'x'`、`NOW()`），仅用户在本机主动输入，属于可信 DDL 场景。
+3. **自增约束**：MySQL/PG 与 `defaultValue` 互斥（勾选自增时忽略默认值）；SQLite 自增强制 `INTEGER PRIMARY KEY AUTOINCREMENT`。
+4. **PostgreSQL 建表位置**：schema 节点提供建表，默认 schema 为 `public`；从 schema 节点会传入 `schema`。
+5. **删除数据库后的树刷新**：`purge` 传 `connId`，会清理该连接下所有缓存，并把连接节点重新展开，避免残留已删除库的子树。
+6. **删除表/集合/库后的页签**：同步关闭关联页签，避免点开报 `table not found`。
+7. **重命名后的页签**：同步更新 `table`/`collection` 与标题，保留用户已打开的浏览页。
+8. **MongoDB**：不提供「新建数据库」（Mongo 无空库概念），库级建表以「新建集合」呈现。
+9. **SQLite**：库 = 文件，不提供建库/删库菜单。
+10. **Redis**：本次不新增菜单项，保持现状。
+11. **菜单定位**：`ContextMenu` 使用 portal + fixed，避免被侧栏滚动容器裁剪。
+
+## 七、假设与决策
+
+- 用户已确认：建表方式参考 Navicat（表名 + 列定义弹窗）；范围覆盖关系型 + MongoDB。
+- 破坏性操作全部二次确认；连接删除也确认（与 HomeScreen 当前直接删除不同，仅在右键菜单路径加确认）。
+- 每次操作后刷新当前父节点子树，不整树重载，保留其它展开状态。
+- 新建成功提示沿用 `app.toast`，不额外跳转新页签。
+
+## 八、验证步骤
+
+1. 类型检查：`pnpm typecheck`（node + web 均通过；`en` 字典 `satisfies` 会捕获 i18n 缺键）。
+2. 构建：`pnpm build` 确认 electron-vite 主/预加载/渲染三端编译通过。
+3. 手动验证（MySQL / PostgreSQL / SQLite / MongoDB 各一条连接）：
+   - 右键连接：新建数据库成功且树中出现新库（MySQL/PG）；删除连接后树与总览同步消失。
+   - 右键库：MySQL/SQLite 新建表（含多列、主键、自增、默认值、可空）成功后树出现新表；PG 在 schema 节点建表成功。
+   - 右键表/集合：重命名后树与已打开页签标题同步；清空后数据页刷新为空；删除后树节点消失且关联页签关闭。
+   - 右键库删除：树中该库消失，连接节点保持展开，其它库不受影响。
+   - SQLite 验证：不存在建库/删库菜单；清空表等价 `DELETE FROM`。
+   - Redis 节点：无右键菜单。
+   - 菜单交互：点击空白处/Esc/滚动自动关闭；靠近视口边缘不溢出；离线连接不出现库表菜单。

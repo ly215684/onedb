@@ -9,7 +9,8 @@ import type {
   MongoDocResult,
   RedisKeyInfo,
   RedisValue,
-  ERDiagram
+  ERDiagram,
+  CreateTableSpec
 } from '../shared/types'
 import { RelationalDriver } from './drivers/driver'
 import { MysqlDriver } from './drivers/mysql'
@@ -190,6 +191,68 @@ class DBManager {
       }
     }
     return { nodes, edges }
+  }
+
+  // ---- 库表管理 ----
+  async createDatabase(id: string, name: string): Promise<void> {
+    const c = this.get(id)
+    if (!c.relational) throw new Error('该连接不支持创建数据库')
+    return c.relational.createDatabase(name)
+  }
+
+  async dropDatabase(id: string, db: string): Promise<void> {
+    const c = this.get(id)
+    if (c.relational) return c.relational.dropDatabase(db)
+    if (c.mongo) return c.mongo.dropDatabase(db)
+    throw new Error('该连接不支持删除数据库')
+  }
+
+  async createTable(id: string, db: string, schema: string | undefined, spec: CreateTableSpec): Promise<void> {
+    const c = this.get(id)
+    if (!c.relational) throw new Error('该连接不支持创建数据表')
+    return c.relational.createTable(db, schema, spec)
+  }
+
+  async dropTable(id: string, db: string, schema: string | undefined, table: string): Promise<void> {
+    const c = this.get(id)
+    if (!c.relational) throw new Error('该连接不支持删除数据表')
+    return c.relational.dropTable(db, schema, table)
+  }
+
+  async truncateTable(id: string, db: string, schema: string | undefined, table: string): Promise<void> {
+    const c = this.get(id)
+    if (!c.relational) throw new Error('该连接不支持清空数据表')
+    return c.relational.truncateTable(db, schema, table)
+  }
+
+  async renameTable(id: string, db: string, schema: string | undefined, oldName: string, newName: string): Promise<void> {
+    const c = this.get(id)
+    if (!c.relational) throw new Error('该连接不支持重命名数据表')
+    return c.relational.renameTable(db, schema, oldName, newName)
+  }
+
+  async createCollection(id: string, db: string, name: string): Promise<void> {
+    const c = this.get(id)
+    if (!c.mongo) throw new Error('该连接不支持创建集合')
+    return c.mongo.createCollection(db, name)
+  }
+
+  async dropCollection(id: string, db: string, name: string): Promise<void> {
+    const c = this.get(id)
+    if (!c.mongo) throw new Error('该连接不支持删除集合')
+    return c.mongo.dropCollection(db, name)
+  }
+
+  async clearCollection(id: string, db: string, name: string): Promise<void> {
+    const c = this.get(id)
+    if (!c.mongo) throw new Error('该连接不支持清空集合')
+    return c.mongo.clearCollection(db, name)
+  }
+
+  async renameCollection(id: string, db: string, oldName: string, newName: string): Promise<void> {
+    const c = this.get(id)
+    if (!c.mongo) throw new Error('该连接不支持重命名集合')
+    return c.mongo.renameCollection(db, oldName, newName)
   }
 
   // ---- Mongo ----

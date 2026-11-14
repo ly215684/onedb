@@ -1,4 +1,4 @@
-import type { ColumnDef, QueryResult, TableSchema } from '../../shared/types'
+import type { ColumnDef, CreateTableSpec, QueryResult, TableSchema } from '../../shared/types'
 
 /** 关系型数据库统一驱动接口（MySQL / PostgreSQL / SQLite） */
 export interface RelationalDriver {
@@ -28,6 +28,13 @@ export interface RelationalDriver {
   ): string
   /** 在同一事务内依次执行 DML 语句，返回受影响行数总和 */
   runBatch(db: string | undefined, statements: string[]): Promise<number>
+  // ---- 库表管理 ----
+  createDatabase(name: string): Promise<void>
+  dropDatabase(name: string): Promise<void>
+  createTable(db: string, schema: string | undefined, spec: CreateTableSpec): Promise<void>
+  dropTable(db: string, schema: string | undefined, table: string): Promise<void>
+  truncateTable(db: string, schema: string | undefined, table: string): Promise<void>
+  renameTable(db: string, schema: string | undefined, oldName: string, newName: string): Promise<void>
   quoteIdent(name: string): string
   close(): Promise<void>
 }

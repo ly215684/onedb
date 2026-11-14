@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import initSqlJs, { type Database } from 'sql.js'
-import type { QueryResult, TableSchema, ColumnDef, IndexDef, ForeignKeyDef } from '../../shared/types'
+import type { QueryResult, TableSchema, ColumnDef, IndexDef, ForeignKeyDef, CreateTableSpec } from '../../shared/types'
 import type { RelationalDriver } from './driver'
 
 let sqlJsPromise: Promise<Awaited<ReturnType<typeof initSqlJs>>> | null = null
@@ -140,6 +140,44 @@ export class SqliteDriver implements RelationalDriver {
       this.db.exec('ROLLBACK')
       throw e
     }
+  }
+
+  // ---- 库表管理 ----
+  async createDatabase(): Promise<void> {
+    throw new Error('SQLite 不支持创建数据库')
+  }
+
+  async dropDatabase(): Promise<void> {
+    throw new Error('SQLite 不支持删除数据库')
+  }
+
+  async createTable(_db: string | undefined, _schema: string | undefined, spec: CreateTableSpec): Promise<void> {
+    const defs = spec.columns.map((c) => {
+      if (c.autoIncrement) return `${this.quoteIdent(c.name)} INTEGER PRIMARY KEY AUTOINCREMENT`
+      let s = `${this.quoteIdent(c.name)} ${c.type}`
+      if (!c.nullable) s += ' NOT NULL'
+      if (c.defaultValue != null && c.defaultValue !== '') s += ` DEFAULT ${c.defaultValue}`
+      return s
+    })
+    const pks = spec.columns.filter((c) => c.primary && !c.autoIncrement).map((c) => this.quoteIdent(c.name))
+    if (pks.length) defs.push(`PRIMARY KEY (${pks.join(', ')})`)
+    this.exec(`CREATE TABLE ${this.quoteIdent(spec.name)} (${defs.join(', ')})`)
+    this.persist()
+  }
+
+  async dropTable(_db: string | undefined, _schema: string | undefined, table: string): Promise<void> {
+    this.exec(`DROP TABLE ${this.quoteIdent(table)}`)
+    this.persist()
+  }
+
+  async truncateTable(_db: string | undefined, _schema: string | undefined, table: string): Promise<void> {
+    this.exec(`DELETE FROM ${this.quoteIdent(table)}`)
+    this.persist()
+  }
+
+  async renameTable(_db: string | undefined, _schema: string | undefined, oldName: string, newName: string): Promise<void> {
+    this.exec(`ALTER TABLE ${this.quoteIdent(oldName)} RENAME TO ${this.quoteIdent(newName)}`)
+    this.persist()
   }
 
   async close(): Promise<void> {

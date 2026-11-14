@@ -3,7 +3,7 @@ import { join } from 'path'
 import { dbManager } from './db'
 import { store } from './store'
 import { initUpdater, autoCheckForUpdates, checkForUpdates, downloadUpdate, installUpdate, getUpdateState } from './updater'
-import type { ConnectionConfig, QueryRequest, SchemaChange, PendingChange, AppSettings } from '../shared/types'
+import type { ConnectionConfig, QueryRequest, SchemaChange, PendingChange, AppSettings, CreateTableSpec } from '../shared/types'
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -75,6 +75,22 @@ function registerIpc(): void {
   handle('tree:collections', (id: string, db: string) => dbManager.listCollections(id, db))
   handle('tree:indexes', (id: string, db: string, col: string) => dbManager.listIndexes(id, db, col))
 
+  // 库表管理
+  handle('db:createDatabase', (id: string, name: string) => dbManager.createDatabase(id, name))
+  handle('db:dropDatabase', (id: string, db: string) => dbManager.dropDatabase(id, db))
+  handle('db:createTable', (id: string, db: string, schema: string | undefined, spec: CreateTableSpec) =>
+    dbManager.createTable(id, db, schema, spec)
+  )
+  handle('db:dropTable', (id: string, db: string, schema: string | undefined, table: string) =>
+    dbManager.dropTable(id, db, schema, table)
+  )
+  handle('db:truncateTable', (id: string, db: string, schema: string | undefined, table: string) =>
+    dbManager.truncateTable(id, db, schema, table)
+  )
+  handle('db:renameTable', (id: string, db: string, schema: string | undefined, oldName: string, newName: string) =>
+    dbManager.renameTable(id, db, schema, oldName, newName)
+  )
+
   // SQL
   handle('sql:query', (id: string, req: QueryRequest) => dbManager.query(id, req))
   handle('sql:schema', (id: string, db: string, schema: string | undefined, table: string) => dbManager.getTableSchema(id, db, schema, table))
@@ -94,6 +110,13 @@ function registerIpc(): void {
     dbManager.mongoUpdateField(id, db, col, docId, field, valueJson)
   )
   handle('mongo:delete', (id: string, db: string, col: string, docId: string) => dbManager.mongoDelete(id, db, col, docId))
+  handle('mongo:createCollection', (id: string, db: string, name: string) => dbManager.createCollection(id, db, name))
+  handle('mongo:dropCollection', (id: string, db: string, name: string) => dbManager.dropCollection(id, db, name))
+  handle('mongo:clearCollection', (id: string, db: string, name: string) => dbManager.clearCollection(id, db, name))
+  handle('mongo:renameCollection', (id: string, db: string, oldName: string, newName: string) =>
+    dbManager.renameCollection(id, db, oldName, newName)
+  )
+  handle('mongo:dropDatabase', (id: string, db: string) => dbManager.dropDatabase(id, db))
 
   // Redis
   handle('redis:scan', (id: string, db: number, pattern: string) => dbManager.redisScan(id, db, pattern))

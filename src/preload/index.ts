@@ -12,7 +12,8 @@ import type {
   MongoDocResult,
   RedisKeyInfo,
   RedisValue,
-  UpdateState
+  UpdateState,
+  CreateTableSpec
 } from '../shared/types'
 
 interface Envelope<T> {
@@ -49,6 +50,18 @@ const api = {
     collections: (id: string, db: string) => invoke<string[]>('tree:collections', id, db),
     indexes: (id: string, db: string, col: string) => invoke<string[]>('tree:indexes', id, db, col)
   },
+  db: {
+    createDatabase: (id: string, name: string) => invoke<void>('db:createDatabase', id, name),
+    dropDatabase: (id: string, db: string) => invoke<void>('db:dropDatabase', id, db),
+    createTable: (id: string, db: string, schema: string | undefined, spec: CreateTableSpec) =>
+      invoke<void>('db:createTable', id, db, schema, spec),
+    dropTable: (id: string, db: string, schema: string | undefined, table: string) =>
+      invoke<void>('db:dropTable', id, db, schema, table),
+    truncateTable: (id: string, db: string, schema: string | undefined, table: string) =>
+      invoke<void>('db:truncateTable', id, db, schema, table),
+    renameTable: (id: string, db: string, schema: string | undefined, oldName: string, newName: string) =>
+      invoke<void>('db:renameTable', id, db, schema, oldName, newName)
+  },
   sql: {
     query: (id: string, req: QueryRequest) => invoke<QueryResult>('sql:query', id, req),
     schema: (id: string, db: string, schema: string | undefined, table: string) => invoke<TableSchema>('sql:schema', id, db, schema, table),
@@ -64,7 +77,13 @@ const api = {
     insert: (id: string, db: string, col: string, doc: string) => invoke<string>('mongo:insert', id, db, col, doc),
     updateField: (id: string, db: string, col: string, docId: string, field: string, valueJson: string) =>
       invoke<number>('mongo:updateField', id, db, col, docId, field, valueJson),
-    delete: (id: string, db: string, col: string, docId: string) => invoke<number>('mongo:delete', id, db, col, docId)
+    delete: (id: string, db: string, col: string, docId: string) => invoke<number>('mongo:delete', id, db, col, docId),
+    createCollection: (id: string, db: string, name: string) => invoke<void>('mongo:createCollection', id, db, name),
+    dropCollection: (id: string, db: string, name: string) => invoke<void>('mongo:dropCollection', id, db, name),
+    clearCollection: (id: string, db: string, name: string) => invoke<void>('mongo:clearCollection', id, db, name),
+    renameCollection: (id: string, db: string, oldName: string, newName: string) =>
+      invoke<void>('mongo:renameCollection', id, db, oldName, newName),
+    dropDatabase: (id: string, db: string) => invoke<void>('mongo:dropDatabase', id, db)
   },
   redis: {
     scan: (id: string, db: number, pattern: string) => invoke<RedisKeyInfo[]>('redis:scan', id, db, pattern),
