@@ -1,9 +1,16 @@
 import { app, BrowserWindow } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import type { UpdateInfo, ProgressInfo } from 'electron-updater'
+import { appendFileSync, mkdirSync } from 'fs'
+import { join } from 'path'
 import type { UpdateState } from '../shared/types'
 
-let state: UpdateState = { status: 'idle', currentVersion: app.getVersion() }
+/** 便携版（单文件 exe）由包装器解压到临时目录运行，无法自行安装更新 */
+function isPortable(): boolean {
+  return !!process.env.PORTABLE_EXECUTABLE_DIR
+}
+
+let state: UpdateState = { status: 'idle', currentVersion: app.getVersion(), portable: isPortable() }
 let initialized = false
 
 function broadcast(): void {
@@ -13,9 +20,29 @@ function broadcast(): void {
 }
 
 function setState(patch: Partial<UpdateState>): UpdateState {
-  state = { ...state, currentVersion: app.getVersion(), ...patch }
+  state = { ...state, currentVersion: app.getVersion(), portable: isPortable(), ...patch }
   broadcast()
   return state
+}
+
+/** 将 electron-updater 的日志落盘，便于排查「明明有新版本却提示已是最新」这类问题 */
+function setupLogger(): void {
+  const dir = join(app.getPath('userData'), 'logs')
+  const file = join(dir, 'updater.log')
+  const write = (level: string, args: unknown[]): void => {
+    try {
+      mkdirSync(dir, { recursive: true })
+      appendFileSync(file, `[${new Date().toISOString()}] ${level} ${args.map((a) => String(a)).join(' ')}\n`)
+    } catch {
+      // 写日志失败不影响更新流程
+    }
+  }
+  autoUpdater.logger = {
+    info: (message?: unknown, ...params: unknown[]) => write('INFO', [message ?? '', ...params]),
+    warn: (message?: unknown, ...params: unknown[]) => write('WARN', [message ?? '', ...params]),
+    error: (message?: unknown, ...params: unknown[]) => write('ERROR', [message ?? '', ...params]),
+    debug: (message?: unknown, ...params: unknown[]) => write('DEBUG', [message ?? '', ...params])
+  }
 }
 
 function normalizeNotes(info: UpdateInfo): string | undefined {
@@ -29,6 +56,7 @@ export function initUpdater(): void {
   if (initialized) return
   initialized = true
 
+  setupLogger()
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = true
 
@@ -84,6 +112,10 @@ export async function downloadUpdate(): Promise<UpdateState> {
   if (!app.isPackaged) {
     return setState({ status: 'error', error: 'dev-mode' })
   }
+  // 便携版下载的仍是单文件 exe，无法覆盖当前运行的程序，直接拒绝
+  if (isPortable()) {
+    return setState({ status: 'error', error: 'portable' })
+  }
   try {
     setState({ status: 'downloading', percent: 0 })
     await autoUpdater.downloadUpdate()
@@ -95,7 +127,7 @@ export async function downloadUpdate(): Promise<UpdateState> {
 
 /** 退出并安装已下载的更新 */
 export function installUpdate(): boolean {
-  if (state.status !== 'downloaded') return false
+  if (state.status !== 'downloaded' || isPortable()) return false
   // isSilent=false：展示安装向导；isForceRunAfter=true：安装完成后自动重启应用
   autoUpdater.quitAndInstall(false, true)
   return true

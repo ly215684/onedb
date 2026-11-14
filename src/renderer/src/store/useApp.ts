@@ -119,7 +119,13 @@ export const useApp = create<AppState>((set, get) => ({
         const zh = get().settings.language === 'zh'
         get().toast(
           'info',
-          zh ? `发现新版本 v${s.latestVersion}，可在设置中下载更新` : `New version v${s.latestVersion} available — download it in Settings`
+          s.portable
+            ? zh
+              ? `发现新版本 v${s.latestVersion}，便携版请从 GitHub Releases 下载安装包`
+              : `New version v${s.latestVersion} available — download the installer from GitHub Releases`
+            : zh
+              ? `发现新版本 v${s.latestVersion}，可在设置中下载更新`
+              : `New version v${s.latestVersion} available — download it in Settings`
         )
       }
     })

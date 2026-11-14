@@ -222,4 +222,6 @@ export interface UpdateState {
   bytesPerSecond?: number
   // 打包构建外的开发环境会被直接拒绝，用 dev-mode 标记以便前端本地化
   error?: string
+  // 便携版（单文件 exe）无法自行安装更新，仅能检查并提示手动下载
+  portable?: boolean
 }

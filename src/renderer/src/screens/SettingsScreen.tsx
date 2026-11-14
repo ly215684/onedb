@@ -77,6 +77,7 @@ export function SettingsScreen(): React.JSX.Element {
       case 'downloaded':
         return tx.settings.downloadComplete
       case 'error':
+        if (u.error === 'portable') return tx.settings.portableNotSupported
         return u.error === 'dev-mode' ? tx.settings.devNotSupported : `${tx.settings.updateError}${u.error ? `: ${u.error}` : ''}`
       default:
         return tx.settings.updateIdle
@@ -188,12 +189,12 @@ export function SettingsScreen(): React.JSX.Element {
             </Row>
             <Row label={tx.settings.updateStatus} desc={updateStatusText}>
               <div className="flex items-center gap-2">
-                {u.status === 'available' && (
+                {u.status === 'available' && !u.portable && (
                   <Button size="sm" variant="primary" icon={<Download size={13} />} onClick={() => void app.downloadUpdate()}>
                     {tx.settings.downloadUpdate}
                   </Button>
                 )}
-                {u.status === 'downloaded' && (
+                {u.status === 'downloaded' && !u.portable && (
                   <Button size="sm" variant="primary" icon={<RotateCcw size={13} />} onClick={() => void app.installUpdate()}>
                     {tx.settings.installNow}
                   </Button>
@@ -208,6 +209,11 @@ export function SettingsScreen(): React.JSX.Element {
                 </Button>
               </div>
             </Row>
+            {u.portable && (
+              <div className="border-t border-line-soft py-2.5 text-[11px] text-fg-faint">
+                {tx.settings.portableNotSupported}
+              </div>
+            )}
             {u.status === 'downloading' && (
               <div className="py-2.5">
                 <div className="h-1.5 w-full overflow-hidden rounded-full bg-line-soft">

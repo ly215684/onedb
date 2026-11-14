@@ -262,6 +262,7 @@ const zh = {
     installNow: '重启并安装',
     updateError: '更新失败',
     devNotSupported: '开发模式不支持自动更新，请使用打包后的版本',
+    portableNotSupported: '便携版不支持自动更新，请从 GitHub Releases 下载安装包',
     releaseNotes: '更新说明',
     footer: 'Electron + React + Tailwind'
   },
@@ -528,6 +529,7 @@ const en = {
     installNow: 'Restart & Install',
     updateError: 'Update failed',
     devNotSupported: 'Auto-update is unavailable in dev mode; use a packaged build',
+    portableNotSupported: 'Portable builds cannot auto-update; download the installer from GitHub Releases',
     releaseNotes: 'Release Notes',
     footer: 'Electron + React + Tailwind'
   },
